@@ -1,0 +1,27 @@
+# Normalize every text file to LF in the repository, regardless of the platform
+# it was authored on. Without this, Windows checkouts store CRLF and anyone
+# cloning on macOS or Linux sees whole-file phantom diffs the first time they
+# touch a file.
+* text=auto eol=lf
+
+# Source and config: text, explicitly.
+*.luau  text eol=lf
+*.lua   text eol=lf
+*.json  text eol=lf
+*.toml  text eol=lf
+*.md    text eol=lf
+
+# Roblox binary model and place formats. Never line-ending converted, never
+# diffed as text.
+*.rbxl  binary
+*.rbxm  binary
+
+# The XML variants are text, but diffing them is noise and merging them by hand
+# is a mistake. Keep the line endings sane and leave them out of diffs.
+*.rbxlx  text eol=lf -diff
+*.rbxmx  text eol=lf -diff
+
+# Images.
+*.png  binary
+*.jpg  binary
+*.tga  binary
