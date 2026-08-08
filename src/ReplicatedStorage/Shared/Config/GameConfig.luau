@@ -266,8 +266,9 @@ GameConfig.RemoteRateLimitPerSecond = 20
 
 -- Logs every swing request and the exact reason any of them is refused, on both
 -- the client and the server. Noisy by design -- it is for answering "I clicked
--- and nothing happened". Set false once mining is behaving.
-GameConfig.DebugMining = true
+-- and nothing happened". Flip to true when a swing isn't landing and the output
+-- will name the exact check that refused it.
+GameConfig.DebugMining = false
 
 -- ==========================================================================
 -- Conversion
