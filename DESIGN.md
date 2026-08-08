@@ -23,8 +23,68 @@ Build a complete, playable Roblox experience called **Mine For Brainrots**. It f
 - **Luau only.** No third-party packages beyond what I list. Target current Roblox API — do not use deprecated members (no `BodyVelocity`, no `wait()`, no `spawn()`; use `task.wait`, `task.spawn`, `LinearVelocity`).
 - **Server-authoritative.** The client requests actions; the server validates and owns all state. Assume every client is an exploiter.
 - **Original IP only.** The "brainrot" characters must be original parodies built from Roblox primitives and free-to-use meshes — invented names and silhouettes in the surreal animal/object mashup style (e.g. `Espressone Squalino`, `Missilino Alligatore`, `Bananutto Gorilloni`). Do not reference, name, or replicate existing meme characters, real brands, or copyrighted assets. Do not hardcode any asset IDs you cannot verify — use `Instance.new` primitives and mark art placeholders with `-- ART TODO`.
+- **Brutalist + pixelated.** The whole game follows the art direction in §2a — no exceptions for "just this one screen".
 - **Mobile + console friendly.** Touch controls, gamepad navigation, UI scaled with `UIScale` driven by viewport size. Nothing smaller than 44px tap targets.
 - **Performance:** target 60 FPS with 20 players. Mining blocks are `Part` instances, not `Terrain`. Use chunk streaming, part pooling, and `CollectionService` tags. No per-frame `FindFirstChild` in hot paths.
+
+## 2a. Art Direction — Brutalist / Pixelated
+
+One look, applied everywhere: world, characters, UI, and effects. If a choice
+makes something smoother, softer, or more rounded, it is the wrong choice.
+
+**The three words**
+
+- **Brutalist** — heavy, honest mass. Slab geometry and blunt volumes. Nothing
+  is decorated; form comes from shape, not ornament.
+- **Pixelated** — hard edges and a deliberately small colour palette. Colour is
+  quantized to discrete steps, never smoothly interpolated. Sub-block detail is
+  built from more blocks.
+- **Cartoony** — surfaces are illustrated, not photographed. Chunky, graphic
+  materials and punchy saturated colour, the way a stylised platformer looks
+  rather than a render of real rock.
+
+**Rules**
+
+1. **Chunky illustrated materials.** Prefer Roblox's graphic, large-feature
+   materials — `LeafyGrass`, `Cobblestone`, `Pebble`, `Sand`, `Sandstone`,
+   `Ice`, `Marble` — over its photoreal ones (`Ground`, `Rock`, `Basalt`,
+   `Slate`, `Concrete`, `Glacier`). Detail should read at block scale from
+   several studs away. No `Neon`, no glass. Reflectance is reserved for ore, as
+   a rarity signal, never as general shine.
+2. **Push colour away from grey.** Roblox lights materials for realism, which
+   desaturates everything. Saturation and value are boosted before the palette
+   is applied (`CartoonSaturation`, `CartoonValueBoost`, `CartoonMinValue`) so
+   surfaces read as flat paint rather than lit stone.
+3. **Quantized palettes.** Every surface picks from a small per-context ramp
+   (3–5 steps) around a base colour. Deterministic per object or per grid
+   position, never random per frame.
+4. **Hard edges.** Right angles, no bevels, no rounded corners anywhere —
+   including UI.
+5. **No image textures or asset IDs.** Surface detail comes from Roblox's
+   built-in materials plus geometry. Sub-block detail is built from more blocks
+   — mine blocks carry small raised pixel tiles on their exposed faces. This
+   keeps the "no unverifiable asset IDs" constraint intact by construction.
+6. **Colour carries meaning.** Rarity, depth, and state are read through the
+   palette first and the material second.
+
+**Applies to**
+
+- **Mine blocks** — per-layer ramp, flat matte, damage shown by darkening the
+  block itself rather than only in the HUD.
+- **Brainrot characters** — built from unsmoothed primitives, flat colours off
+  a per-rarity ramp. Mutations shift the ramp (gold, diamond, glitched) rather
+  than adding gloss or particles-as-polish.
+- **Hub, plots, and podiums** — concrete slabs and right angles.
+- **UI** — square corners, hard 2px borders, flat fills, no drop shadows, no
+  gradients. This **overrides** §6's "chunky rounded corners": panels are
+  square. Keep the dark slate palette and the saturated per-rarity accent.
+- **Effects** — stepped, not smooth. Particles are square. Tweens use discrete
+  steps or snappy easing rather than long soft fades.
+
+**Implementation note.** The mine's half of this lives in the `Palette*` and
+`CrackDarken*` constants in `GameConfig.luau`, plus `material` / `baseColor` /
+`topMaterial` / `topColor` per layer in `LayerConfig.luau`. Anything new that
+renders should read from config the same way rather than hardcoding colours.
 
 ## 3. Project Structure
 
@@ -136,7 +196,7 @@ Ship **6 depth layers** (Topsoil, Stonecore, Ironvein, Crystalis, Magmadeep, The
 
 ## 6. UI Requirements
 
-Build all UI in code (no `.rbxmx` dependency), styled cohesively: dark slate panels, chunky rounded corners, a saturated accent per rarity, `GothamBold`-family fonts, and spring-tweened open/close. Include:
+Build all UI in code (no `.rbxmx` dependency), styled per §2a: dark slate panels, **square corners with hard 2px borders** (not rounded — §2a overrides this), flat fills with no gradients or drop shadows, a saturated accent per rarity, `GothamBold`-family fonts, and snappy stepped open/close rather than soft spring fades. Include:
 
 - **HUD:** coins (abbreviated), $/sec, backpack fill bar with color shift as it fills, current depth in studs, equipped pickaxe icon.
 - **Shop:** tabbed (Pickaxes / Backpacks / Plot Slots / Layer Keys), each card showing stat delta vs. currently equipped, owned/equipped/locked states, and a disabled-with-reason state when unaffordable.

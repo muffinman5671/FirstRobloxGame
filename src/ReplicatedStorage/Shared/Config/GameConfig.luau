@@ -30,6 +30,181 @@ GameConfig.ShaftRadiusBlocks = 6
 -- at Y = -120 sits at depth 120.
 GameConfig.SurfaceY = 0
 
+-- World XZ the shaft is centred on. Offset from the origin so the hub floor
+-- (and the place's stock SpawnLocation at 0,0,0) sits on solid ground rather
+-- than over the shaft opening.
+GameConfig.ShaftCenterX = 0
+GameConfig.ShaftCenterZ = 80
+
+-- Hub platform built by MineService. Its top surface is SurfaceY, with a square
+-- opening cut out over the shaft.
+GameConfig.HubExtent = 256 -- half-width, studs
+GameConfig.HubThickness = 20
+
+-- Blocks materialized per streaming tick. Caps the cost of a single pass so a
+-- player teleporting to a fresh depth spreads the work over a few frames
+-- instead of hitching.
+GameConfig.MaxBlocksPerStreamTick = 220
+
+--[[
+	Ground safety.
+
+	The budget above means a fast-moving player can outrun materialization and
+	fall through a floor that hasn't spawned yet. Blocks within SafeLoadRadius
+	of a player are therefore loaded *before* the budgeted pass and ignore the
+	budget entirely -- the floor under your feet is never the thing that gets
+	deferred.
+
+	SafeLoadRadius must comfortably exceed how far a player travels in one
+	ChunkStreamTickSeconds (walkspeed 16 -> 8 studs, plus fall speed).
+]]
+GameConfig.SafeLoadRadius = 40
+
+-- A player below the mine floor by this much has fallen out of the world and
+-- gets returned to the hub. Generous enough that legitimately standing on the
+-- deepest block never trips it.
+GameConfig.VoidCatchMargin = 60
+
+-- Checked every this many seconds. Fast enough to catch a fall before it feels
+-- like a death, cheap enough to ignore.
+GameConfig.VoidCatchTickSeconds = 0.5
+
+-- Crack stages rendered on a damaged block, excluding "undamaged". The server
+-- writes the current stage to a part attribute for the client to read; it is
+-- display only and is never read back as authoritative state.
+GameConfig.CrackStages = 4
+
+-- ==========================================================================
+-- Art direction: brutalist / pixelated
+-- ==========================================================================
+--[[
+	The look is flat matte mass with a deliberately small colour palette --
+	heavy, blocky, poster-like, no gloss and no gradients. See "Art Direction"
+	in DESIGN.md; these constants are the mine's half of it.
+
+	Rather than give every block its layer's exact colour, each one picks a
+	discrete shade from a tiny per-layer ramp. A wall then reads as quantized
+	pixel noise instead of one flat slab, without any textures or asset IDs.
+]]
+
+-- Steps in each layer's ramp. Small on purpose: more shades read as a smooth
+-- gradient, which is the opposite of the intent. 3-5 is the usable range.
+GameConfig.PaletteShades = 4
+
+-- How far the lightest and darkest steps sit from the layer's base colour.
+-- Above ~0.2 the ramp starts to look like lighting rather than palette.
+GameConfig.PaletteShadeRange = 0.14
+
+-- Extra darkening per crack stage, so damage is visible on the block itself
+-- rather than only in the HUD.
+GameConfig.CrackDarkenPerStage = 0.11
+
+--[[
+	Pixel tiles.
+
+	A block painted one flat colour still reads as one flat colour no matter how
+	good the material is. So each block gets a couple of small raised tiles on
+	its *exposed* faces, in a different step of the same ramp -- literal pixels,
+	built from geometry rather than from a texture (DESIGN.md §2a: "sub-block
+	detail is built from more blocks, not from texture").
+
+	Only exposed faces are tiled, so a buried block costs nothing and the extra
+	part count is roughly one to two per visible block.
+]]
+
+-- Tiles per block. 0 disables the effect entirely.
+GameConfig.PixelTilesPerBlock = 2
+
+-- Cells per face axis. 3 gives a 3x3 grid of possible tile positions, so a tile
+-- is a third of a face -- chunky enough to read as a pixel, not as noise.
+GameConfig.PixelTileGrid = 3
+
+-- How far a tile stands proud of the face, in studs. Just enough to avoid
+-- z-fighting and catch a different shade of light.
+GameConfig.PixelTileRelief = 0.06
+
+-- How many ramp steps away a tile's shade sits from its block's. 1 keeps the
+-- block reading as one material; larger values look like damage.
+GameConfig.PixelTileShadeOffset = 1
+
+--[[
+	Cartoon colour treatment.
+
+	Roblox's materials are lit and shaded for realism, which drags every surface
+	toward grey. Pushing saturation and value up before the palette is applied
+	pulls it back toward flat illustrated colour -- the single biggest lever on
+	whether the mine reads as cartoony or as a photo of some rocks.
+
+	Applied to layer colours and ore colours alike, so ore veins stay vivid.
+]]
+GameConfig.CartoonSaturation = 1.45
+GameConfig.CartoonValueBoost = 1.12
+
+-- Floor on value, so the darkest layers still read as coloured rather than
+-- collapsing to black under the palette's darker steps.
+GameConfig.CartoonMinValue = 0.22
+
+--[[
+	Grass only caps blocks in the top rows. Without this, digging down turns
+	every newly exposed block into a grass block, and you end up with lawn
+	forty studs underground.
+
+	Row index, not studs: row 0 is the surface row whose top face sits at
+	SurfaceY. Set to -1 to disable grass caps entirely.
+]]
+GameConfig.GrassMaxRow = 0
+
+--[[
+	Ore is suppressed in the topmost rows of the shaft so the grass surface
+	reads as clean ground rather than a speckled mess, and so the first thing a
+	player sees is a recognisable landscape. Below this depth ore generates
+	normally.
+
+	Rows, not studs: 2 rows at BlockSize 4 is the top 8 studs.
+]]
+GameConfig.OreFreeSurfaceRows = 2
+
+--[[
+	Ore blocks are shinier than the rock around them, scaled by rarity, so a
+	valuable vein is obvious at a glance against a matte wall. Common ore is the
+	filler rock itself and stays flat.
+]]
+GameConfig.OreReflectance = {
+	Common = 0,
+	Uncommon = 0.10,
+	Rare = 0.18,
+	Epic = 0.28,
+	Legendary = 0.40,
+	Mythic = 0.55,
+}
+
+-- Material used for any Uncommon-or-better ore block, unless the ore declares
+-- its own. Metal catches light against the matte layer materials.
+GameConfig.OreMaterial = Enum.Material.Metal
+
+-- ==========================================================================
+-- Swing animation and block health bar
+-- ==========================================================================
+
+-- Length of one procedural pickaxe swing, in seconds. Clamped at runtime to
+-- stay under the equipped pickaxe's cooldown so swings never overlap.
+GameConfig.SwingAnimSeconds = 0.34
+
+-- Phase boundaries within that swing, as fractions: wind up, then strike, then
+-- recover. Strike is deliberately the shortest for a sharp, weighty hit.
+GameConfig.SwingAnimWindupEnd = 0.35
+GameConfig.SwingAnimStrikeEnd = 0.55
+
+-- Peak angles, in degrees: back over the shoulder, then down through the block.
+GameConfig.SwingAnimWindupAngle = 65
+GameConfig.SwingAnimStrikeAngle = -50
+
+-- Health bar shown above a block once it has taken damage. Hidden at full HP so
+-- an untouched wall isn't covered in UI.
+GameConfig.BlockHealthBarWidth = 78
+GameConfig.BlockHealthBarHeight = 11
+GameConfig.BlockHealthBarOffset = 2.8
+
 -- Streaming hysteresis, in studs. Chunks materialize inside StreamRadius and are
 -- only reclaimed past ReclaimRadius, so a player pacing a border can't thrash
 -- the part pool. Keep Reclaim comfortably larger than Stream.
@@ -88,6 +263,11 @@ GameConfig.SwingRateViolationFactor = 1.5
 
 -- Remote calls per player per second, across all remotes, before throttling.
 GameConfig.RemoteRateLimitPerSecond = 20
+
+-- Logs every swing request and the exact reason any of them is refused, on both
+-- the client and the server. Noisy by design -- it is for answering "I clicked
+-- and nothing happened". Set false once mining is behaving.
+GameConfig.DebugMining = true
 
 -- ==========================================================================
 -- Conversion

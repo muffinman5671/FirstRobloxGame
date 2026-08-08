@@ -36,13 +36,15 @@ export type Service = {
 	Boot order. Dependencies point upward: a service may depend on anything
 	above it during Start, and on nothing during Init.
 
-	Phase A ships DataService only. Later phases append here in this order:
-	  MineService, MiningService, InventoryService, EconomyService,
-	  ConversionService, PlotService, IncomeService, ShopService,
-	  AntiCheatService, LeaderboardService
+	Remaining phases append here in this order:
+	  EconomyService, ConversionService, PlotService, IncomeService,
+	  ShopService, AntiCheatService, LeaderboardService
 ]]
 local BOOT_ORDER = {
 	"DataService",
+	"MineService",
+	"InventoryService",
+	"MiningService",
 }
 
 local servicesFolder = script:WaitForChild("Services")

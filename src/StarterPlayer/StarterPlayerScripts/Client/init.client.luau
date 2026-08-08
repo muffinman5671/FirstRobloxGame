@@ -4,10 +4,8 @@
 	Mirrors the server's two-phase boot. Controllers live under Controllers/ and
 	expose an optional Init() and Start().
 
-	Phase A ships no controllers -- this file exists so the client boots clean
-	and so phases B through E have a registry to slot into. CONTROLLER_ORDER
-	fills in as:
-	  MiningController, UIController, EffectsController, NotifyController
+	Remaining phases append here in this order:
+	  UIController, EffectsController, NotifyController
 ]]
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -21,7 +19,9 @@ export type Controller = {
 	[any]: any,
 }
 
-local CONTROLLER_ORDER: { string } = {}
+local CONTROLLER_ORDER: { string } = {
+	"MiningController",
+}
 
 -- Blocks until the server's remote folder has replicated, so no controller has
 -- to defend against a missing remote.

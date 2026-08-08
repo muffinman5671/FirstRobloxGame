@@ -31,6 +31,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 
 local GameConfig = require(ReplicatedStorage.Shared.Config.GameConfig)
+local RemoteRegistry = require(ReplicatedStorage.Shared.Remotes.RemoteRegistry)
 local Signal = require(ReplicatedStorage.Shared.Modules.Signal)
 local SharedTypes = require(ReplicatedStorage.Shared.Modules.SharedTypes)
 local ToolConfig = require(ReplicatedStorage.Shared.Config.ToolConfig)
@@ -183,6 +184,32 @@ local realStore: DataStore? = nil
 local mockStore: { [string]: StoredDocument }? = nil
 local warnedAboutMock = false
 
+--[[
+	Studio blocks DataStore access in two different places depending on how the
+	place is set up:
+	  unsaved place  -- GetDataStore itself throws
+	  saved but unpublished, or API access off -- GetDataStore succeeds and
+	    every operation throws instead
+	Both mean the same thing, and neither is retryable, so they're detected by
+	message and treated as permanent.
+]]
+local API_ACCESS_HINTS = {
+	"StudioAccessToApisNotAllowed",
+	"API access is not enabled",
+	"Cannot write to DataStore from studio",
+	"publish this place",
+}
+
+local function isApiAccessError(err: any): boolean
+	local text = tostring(err)
+	for _, hint in API_ACCESS_HINTS do
+		if string.find(text, hint, 1, true) then
+			return true
+		end
+	end
+	return false
+end
+
 local function useMockStore(reason: string)
 	if RunService:IsStudio() then
 		if not warnedAboutMock then
@@ -241,6 +268,12 @@ local function attempt<T>(label: string, fn: () -> T): (boolean, any)
 
 		lastError = result
 
+		-- Permanent. Retrying can't help and would flood the log five times
+		-- over before failing anyway.
+		if isApiAccessError(result) then
+			return false, result
+		end
+
 		if tries < MAX_ATTEMPTS then
 			local delay = math.min(BACKOFF_BASE_SECONDS * 2 ^ (tries - 1), BACKOFF_MAX_SECONDS)
 			-- Jitter stops 20 players' autosaves from retrying in lockstep.
@@ -280,7 +313,22 @@ local function updateAsync(key: string, label: string, transform: (StoredDocumen
 		return store:UpdateAsync(key, transform)
 	end)
 
-	return ok, result
+	if ok then
+		return true, result
+	end
+
+	-- The store constructed fine but the operation was refused on API access.
+	-- Fall back here too, then drop the real store so later calls go straight
+	-- to the mock instead of failing again first.
+	if isApiAccessError(result) then
+		useMockStore(tostring(result))
+		if mockStore then
+			realStore = nil
+			return true, mockUpdate(key, transform)
+		end
+	end
+
+	return false, nil
 end
 
 -- ==========================================================================
@@ -546,6 +594,55 @@ function DataService.snapshot(player: Player): Profile?
 	return if session then deepCopy(session.profile) else nil
 end
 
+--[[
+	Income is owned by IncomeService, which doesn't exist until phase D. It
+	registers a provider here so the client snapshot can carry a live $/sec
+	without DataService having to know how income is computed.
+]]
+local incomeProvider: ((Player) -> number)? = nil
+
+function DataService.setIncomeProvider(provider: (Player) -> number)
+	incomeProvider = provider
+end
+
+--[[
+	The client-facing projection of a profile. Deliberately not the whole thing:
+	lock state, playtime, and the pity counter stay server-side. Pity in
+	particular must not leak, or a client could time its rolls.
+]]
+function DataService.buildSnapshot(player: Player): SharedTypes.ProfileSnapshot?
+	local session = sessions[player]
+	if not session then
+		return nil
+	end
+
+	local profile = session.profile
+	return {
+		coins = profile.coins,
+		gems = profile.gems,
+		rebirths = profile.rebirths,
+		ownedTools = deepCopy(profile.ownedTools),
+		equippedPickaxe = profile.equippedPickaxe,
+		equippedBackpack = profile.equippedBackpack,
+		oreCounts = deepCopy(profile.oreCounts),
+		brainrotsOwned = deepCopy(profile.brainrotsOwned),
+		placedBrainrots = deepCopy(profile.placedBrainrots),
+		unlockedLayers = deepCopy(profile.unlockedLayers),
+		indexDiscovered = deepCopy(profile.indexDiscovered),
+		plotSlots = profile.plotSlots,
+		incomePerSecond = if incomeProvider then incomeProvider(player) else 0,
+	}
+end
+
+-- Pushes a fresh snapshot to one client. Services call this after any change
+-- the client needs to see immediately rather than on its next poll.
+function DataService.pushSnapshot(player: Player)
+	local snapshot = DataService.buildSnapshot(player)
+	if snapshot then
+		RemoteRegistry.event("ProfileUpdated"):FireClient(player, snapshot)
+	end
+end
+
 function DataService.getSchemaVersion(): number
 	return SCHEMA_VERSION
 end
@@ -570,6 +667,18 @@ function DataService.Init()
 end
 
 function DataService.Start()
+	-- The client's first read of its own state. Returns nil if the profile is
+	-- still loading; the client retries rather than caching a blank.
+	RemoteRegistry.func("GetProfileSnapshot").OnServerInvoke = function(player: Player)
+		return DataService.buildSnapshot(player)
+	end
+
+	-- Push a snapshot as soon as the profile exists, so a client that joined
+	-- before its data loaded doesn't have to poll.
+	DataService.ProfileLoaded:Connect(function(player: Player)
+		DataService.pushSnapshot(player)
+	end)
+
 	for _, player in Players:GetPlayers() do
 		task.spawn(loadProfile, player)
 	end

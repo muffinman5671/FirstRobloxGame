@@ -31,6 +31,7 @@ export type OreDef = {
 	layers: { [number]: number }, -- layerIndex -> spawn weight
 	convertsTo: { string }, -- BrainrotDef ids this ore biases toward
 	minRebirths: number?, -- gated ore tiers; nil means always available
+	material: Enum.Material?, -- overrides the layer's material when set
 }
 
 export type BrainrotDef = {
@@ -51,6 +52,14 @@ export type LayerDef = {
 	maxDepth: number, -- exclusive
 	hpMultiplier: number,
 	unlockCost: number,
+	-- Look of the rock itself. Filler (Common) ore takes baseColor so a layer
+	-- reads as one substance; rarer ore keeps its own colour and shows as veins.
+	material: Enum.Material,
+	baseColor: Color3,
+	-- Used for a block whose top face is exposed -- grass on the surface,
+	-- bare rock once you dig past it. nil means "same as material".
+	topMaterial: Enum.Material?,
+	topColor: Color3?,
 	ambientColor: Color3,
 	fogColor: Color3,
 	fogEnd: number,

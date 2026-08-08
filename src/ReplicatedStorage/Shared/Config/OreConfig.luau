@@ -78,7 +78,10 @@ OreConfig.ORES = table.freeze({
 		baseValue = 20,
 		hardness = 2,
 		weightPerUnit = 1,
-		layers = { [1] = 22, [2] = 48 },
+		-- Topsoil is deliberately ore-free: no Uncommon-or-better ore spawns
+		-- in layer 1, so the surface reads as plain ground and real veins are
+		-- something you dig down to find.
+		layers = { [2] = 48, [3] = 12 },
 		convertsTo = { "cornetto_volpini", "salamino_furettoni" },
 	},
 	{
@@ -89,7 +92,8 @@ OreConfig.ORES = table.freeze({
 		baseValue = 24,
 		hardness = 2,
 		weightPerUnit = 2,
-		layers = { [1] = 14, [2] = 36 },
+		-- See rustcap_nodule: layer 1 carries filler rock only.
+		layers = { [2] = 36, [3] = 10 },
 		convertsTo = { "bananutto_gorilloni", "pomodrone_ricci" },
 	},
 	{
