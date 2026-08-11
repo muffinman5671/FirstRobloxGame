@@ -37,14 +37,16 @@ export type Service = {
 	above it during Start, and on nothing during Init.
 
 	Remaining phases append here in this order:
-	  EconomyService, ConversionService, PlotService, IncomeService,
-	  ShopService, AntiCheatService, LeaderboardService
+	  ConversionService, PlotService, IncomeService, AntiCheatService,
+	  LeaderboardService
 ]]
 local BOOT_ORDER = {
 	"DataService",
 	"MineService",
 	"InventoryService",
 	"MiningService",
+	"EconomyService",
+	"ShopService",
 }
 
 local servicesFolder = script:WaitForChild("Services")

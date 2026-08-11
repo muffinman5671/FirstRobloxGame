@@ -21,6 +21,7 @@ export type Controller = {
 
 local CONTROLLER_ORDER: { string } = {
 	"MiningController",
+	"UIController",
 }
 
 -- Blocks until the server's remote folder has replicated, so no controller has
