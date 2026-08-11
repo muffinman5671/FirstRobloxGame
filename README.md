@@ -150,12 +150,17 @@ Append one entry to `BrainrotConfig.BRAINROTS`, point at least one ore's
 
 ## Art and IP
 
-Every brainrot in this project is original to it. Names, silhouettes, and
-builders are invented in a generic surreal animal/object-mashup style; nothing
-references an existing meme character, real brand, or third-party asset. No
-asset IDs appear anywhere in the source — `ModelFactory` builds each character
-from `Instance.new` primitives, and placeholder art is marked `-- ART TODO` at
-the builder.
+The characters use the established "Italian brainrot" meme names that circulate
+widely online. **Names are shared; artwork is not.** No mesh, texture, model, or
+asset ID from any other Roblox experience is used or referenced, and no asset ID
+appears anywhere in the source — `ModelFactory` builds every character from
+`Instance.new` primitives, and placeholder art is marked `-- ART TODO` at the
+builder. Silhouettes, hub, UI, and progression are original to this project.
+
+These names are shared with other live Roblox experiences, and Roblox moderates
+games that read as clones of popular ones. Keeping the visual design and
+progression visibly distinct is a deliberate requirement, not a nicety. See
+DESIGN.md §2.
 
 ---
 

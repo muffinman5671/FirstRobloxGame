@@ -7,7 +7,10 @@
 	`convertsTo` lists the brainrots this ore biases toward in the Conversion
 	Chamber. Those entries get their weight multiplied by
 	GameConfig.ConversionOreBias; everything else still rolls at base weight, so
-	no ore ever hard-locks an outcome.
+	no ore ever hard-locks an outcome. Every brainrot in BrainrotConfig is
+	reachable from at least one ore -- the Tests/ suite asserts it.
+
+	Layer 1 is deliberately Common-only: see GameConfig.OreFreeSurfaceRows.
 
 	Adding an ore: append an entry here and give it at least one layer weight.
 	Nothing else needs editing -- MineService builds its per-layer tables from
@@ -33,7 +36,7 @@ OreConfig.ORES = table.freeze({
 		hardness = 1,
 		weightPerUnit = 1,
 		layers = { [1] = 100 },
-		convertsTo = { "pastuccio_rattoni", "grissino_talpini" },
+		convertsTo = { "bobrito_bandito", "trulimero_trulicina" },
 	},
 	{
 		id = "pebble_grit",
@@ -44,7 +47,7 @@ OreConfig.ORES = table.freeze({
 		hardness = 1,
 		weightPerUnit = 1,
 		layers = { [1] = 70, [2] = 45 },
-		convertsTo = { "ciabatta_piccioni", "tostapane_bruchini" },
+		convertsTo = { "boneca_ambalabu", "piccione_macchina" },
 	},
 	{
 		id = "slate_marrow",
@@ -55,7 +58,7 @@ OreConfig.ORES = table.freeze({
 		hardness = 2,
 		weightPerUnit = 1,
 		layers = { [2] = 80, [3] = 30 },
-		convertsTo = { "zuppetta_lumacone", "fungetto_rospino" },
+		convertsTo = { "trippi_troppi", "bananita_dolphinita" },
 	},
 	{
 		id = "cinder_flake",
@@ -66,7 +69,7 @@ OreConfig.ORES = table.freeze({
 		hardness = 2,
 		weightPerUnit = 1,
 		layers = { [2] = 55, [3] = 40 },
-		convertsTo = { "fungetto_rospino", "tostapane_bruchini" },
+		convertsTo = { "bananita_dolphinita", "piccione_macchina" },
 	},
 
 	-- ================= Uncommon =================
@@ -82,11 +85,11 @@ OreConfig.ORES = table.freeze({
 		-- in layer 1, so the surface reads as plain ground and real veins are
 		-- something you dig down to find.
 		layers = { [2] = 48, [3] = 12 },
-		convertsTo = { "cornetto_volpini", "salamino_furettoni" },
+		convertsTo = { "glorbo_fruttodrillo", "frigo_camelo" },
 	},
 	{
-		id = "bananutto_pith",
-		displayName = "Bananutto Pith",
+		id = "bananini_pith",
+		displayName = "Bananini Pith",
 		rarity = "Uncommon",
 		color = Color3.fromRGB(214, 194, 88),
 		baseValue = 24,
@@ -94,7 +97,7 @@ OreConfig.ORES = table.freeze({
 		weightPerUnit = 2,
 		-- See rustcap_nodule: layer 1 carries filler rock only.
 		layers = { [2] = 36, [3] = 10 },
-		convertsTo = { "bananutto_gorilloni", "pomodrone_ricci" },
+		convertsTo = { "chimpanzini_bananini", "burbaloni_luliloli" },
 	},
 	{
 		id = "copperbloom_sprig",
@@ -105,7 +108,7 @@ OreConfig.ORES = table.freeze({
 		hardness = 3,
 		weightPerUnit = 1,
 		layers = { [2] = 24, [3] = 52 },
-		convertsTo = { "sardinella_gattoni", "biscottino_armadillo" },
+		convertsTo = { "brr_brr_patapim", "burbaloni_luliloli" },
 	},
 	{
 		id = "sootglass_bead",
@@ -116,149 +119,149 @@ OreConfig.ORES = table.freeze({
 		hardness = 3,
 		weightPerUnit = 2,
 		layers = { [3] = 44, [4] = 18 },
-		convertsTo = { "salamino_furettoni", "biscottino_armadillo" },
+		convertsTo = { "frigo_camelo", "cappuccino_assassino" },
 	},
 
 	-- ================= Rare =================
 	{
-		id = "espressone_ore",
-		displayName = "Espressone Shard",
+		id = "cappuccino_ore",
+		displayName = "Cappuccino Shard",
 		rarity = "Rare",
 		color = Color3.fromRGB(84, 52, 38),
 		baseValue = 62,
 		hardness = 3,
 		weightPerUnit = 2,
 		layers = { [3] = 40, [4] = 25 },
-		convertsTo = { "espressone_squalino", "calzone_pipistrello" },
+		convertsTo = { "cappuccino_assassino", "ballerina_cappuccina" },
 	},
 	{
-		id = "gattone_geode",
-		displayName = "Gattone Geode",
+		id = "patapim_geode",
+		displayName = "Patapim Geode",
 		rarity = "Rare",
 		color = Color3.fromRGB(122, 96, 190),
 		baseValue = 70,
 		hardness = 4,
 		weightPerUnit = 2,
 		layers = { [3] = 28, [4] = 34 },
-		convertsTo = { "focaccia_cinghiale", "limoncello_fenicotti" },
+		convertsTo = { "brr_brr_patapim", "lirili_larila" },
 	},
 	{
-		id = "calzone_clinker",
-		displayName = "Calzone Clinker",
+		id = "sahur_clinker",
+		displayName = "Sahur Clinker",
 		rarity = "Rare",
 		color = Color3.fromRGB(196, 138, 92),
 		baseValue = 78,
 		hardness = 4,
 		weightPerUnit = 2,
 		layers = { [4] = 38, [5] = 16 },
-		convertsTo = { "calzone_pipistrello", "missilino_alligatore" },
+		convertsTo = { "tung_tung_tung_sahur", "bombombini_gusini" },
 	},
 	{
-		id = "fenicotti_quartz",
-		displayName = "Fenicotti Quartz",
+		id = "cappuccina_quartz",
+		displayName = "Cappuccina Quartz",
 		rarity = "Rare",
 		color = Color3.fromRGB(238, 132, 158),
 		baseValue = 85,
 		hardness = 4,
 		weightPerUnit = 2,
 		layers = { [4] = 30, [5] = 22 },
-		convertsTo = { "limoncello_fenicotti", "espressone_squalino" },
+		convertsTo = { "ballerina_cappuccina", "tralalero_tralala" },
 	},
 
 	-- ================= Epic =================
 	{
-		id = "missilino_slag",
-		displayName = "Missilino Slag",
+		id = "crocodilo_slag",
+		displayName = "Crocodilo Slag",
 		rarity = "Epic",
 		color = Color3.fromRGB(206, 88, 62),
 		baseValue = 205,
 		hardness = 5,
 		weightPerUnit = 3,
 		layers = { [4] = 14, [5] = 34 },
-		convertsTo = { "missilino_alligatore", "vulcanetto_rinoceronte" },
+		convertsTo = { "bombardiro_crocodilo", "girafa_celestre" },
 	},
 	{
-		id = "aquilotto_prism",
-		displayName = "Aquilotto Prism",
+		id = "tralala_prism",
+		displayName = "Tralala Prism",
 		rarity = "Epic",
 		color = Color3.fromRGB(120, 206, 232),
 		baseValue = 232,
 		hardness = 5,
 		weightPerUnit = 3,
 		layers = { [5] = 26, [6] = 14 },
-		convertsTo = { "turbinello_aquilotto", "ombrellone_mantide" },
+		convertsTo = { "tralalero_tralala", "orangutini_ananassini" },
 	},
 	{
-		id = "mantide_resin",
-		displayName = "Mantide Resin",
+		id = "watermelini_resin",
+		displayName = "Watermelini Resin",
 		rarity = "Epic",
 		color = Color3.fromRGB(126, 208, 96),
 		baseValue = 258,
 		hardness = 6,
 		weightPerUnit = 3,
 		layers = { [5] = 20, [6] = 18 },
-		convertsTo = { "ombrellone_mantide", "marmellata_ippopotamo" },
+		convertsTo = { "tigrullini_watermelini", "orangutini_ananassini" },
 	},
 
 	-- ================= Legendary =================
 	{
-		id = "balenotto_core",
-		displayName = "Balenotto Core",
+		id = "saturnita_core",
+		displayName = "Saturnita Core",
 		rarity = "Legendary",
 		color = Color3.fromRGB(64, 118, 208),
 		baseValue = 720,
 		hardness = 6,
 		weightPerUnit = 4,
 		layers = { [5] = 8, [6] = 22 },
-		convertsTo = { "cattedrale_balenotto", "meteorito_scorpione" },
+		convertsTo = { "la_vacca_saturno_saturnita", "chimpanzini_spiderini" },
 	},
 	{
-		id = "scorpione_ember",
-		displayName = "Scorpione Ember",
+		id = "spiderini_ember",
+		displayName = "Spiderini Ember",
 		rarity = "Legendary",
 		color = Color3.fromRGB(248, 148, 40),
 		baseValue = 830,
 		hardness = 7,
 		weightPerUnit = 4,
 		layers = { [6] = 18 },
-		convertsTo = { "meteorito_scorpione", "fulminaccio_condorini" },
+		convertsTo = { "chimpanzini_spiderini", "cocofanto_elefanto" },
 	},
 	{
-		id = "condorini_arcglass",
-		displayName = "Condorini Arcglass",
+		id = "elefanto_arcglass",
+		displayName = "Elefanto Arcglass",
 		rarity = "Legendary",
 		color = Color3.fromRGB(232, 228, 128),
 		baseValue = 940,
 		hardness = 7,
 		weightPerUnit = 4,
 		layers = { [6] = 14 },
-		convertsTo = { "fulminaccio_condorini", "cattedrale_balenotto" },
+		convertsTo = { "cocofanto_elefanto", "la_vacca_saturno_saturnita" },
 	},
 
 	-- ================= Mythic =================
 	-- Gated behind rebirths, per the doc's "rebirth unlocks exclusive ore tiers".
 	{
-		id = "krakenetto_voidpearl",
-		displayName = "Krakenetto Voidpearl",
+		id = "medussi_voidpearl",
+		displayName = "Medussi Voidpearl",
 		rarity = "Mythic",
 		color = Color3.fromRGB(42, 32, 78),
 		baseValue = 2850,
 		hardness = 8,
 		weightPerUnit = 4,
 		layers = { [6] = 6 },
-		convertsTo = { "nebulosa_krakenetto", "paradosso_sfingelli" },
+		convertsTo = { "graipuss_medussi", "garama_madundung" },
 		minRebirths = 3,
 	},
 	{
-		id = "sfingelli_paradox",
-		displayName = "Sfingelli Paradox",
+		id = "garama_paradox",
+		displayName = "Garama Paradox",
 		rarity = "Mythic",
 		color = Color3.fromRGB(236, 240, 252),
 		baseValue = 3400,
 		hardness = 8,
 		weightPerUnit = 4,
 		layers = { [6] = 4 },
-		convertsTo = { "paradosso_sfingelli", "nebulosa_krakenetto" },
+		convertsTo = { "garama_madundung", "graipuss_medussi" },
 		minRebirths = 3,
 	},
 } :: { OreDef })

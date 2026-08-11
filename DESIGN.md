@@ -22,7 +22,8 @@ Build a complete, playable Roblox experience called **Mine For Brainrots**. It f
 
 - **Luau only.** No third-party packages beyond what I list. Target current Roblox API — do not use deprecated members (no `BodyVelocity`, no `wait()`, no `spawn()`; use `task.wait`, `task.spawn`, `LinearVelocity`).
 - **Server-authoritative.** The client requests actions; the server validates and owns all state. Assume every client is an exploiter.
-- **Original IP only.** The "brainrot" characters must be original parodies built from Roblox primitives and free-to-use meshes — invented names and silhouettes in the surreal animal/object mashup style (e.g. `Espressone Squalino`, `Missilino Alligatore`, `Bananutto Gorilloni`). Do not reference, name, or replicate existing meme characters, real brands, or copyrighted assets. Do not hardcode any asset IDs you cannot verify — use `Instance.new` primitives and mark art placeholders with `-- ART TODO`.
+- **Established brainrot names, original assets.** The characters use the recognised "Italian brainrot" meme names that circulate widely online (e.g. `Tralalero Tralala`, `Bombardiro Crocodilo`, `Tung Tung Tung Sahur`, `La Vacca Saturno Saturnita`). Names and short phrases are used; **artwork is not**. Do not copy, trace, or reference meshes, textures, models, or asset IDs from any other Roblox experience. Do not hardcode any asset ID you cannot verify — build every character from `Instance.new` primitives and mark art placeholders with `-- ART TODO`. Do not reference real brands or copyrighted works beyond the meme names themselves.
+  - **Known risk, accepted deliberately:** these names are shared with other live Roblox experiences. Roblox moderates games that read as clones of popular ones. Silhouettes, hub layout, UI, and progression are ours and should stay visibly distinct.
 - **Brutalist + pixelated.** The whole game follows the art direction in §2a — no exceptions for "just this one screen".
 - **Mobile + console friendly.** Touch controls, gamepad navigation, UI scaled with `UIScale` driven by viewport size. Nothing smaller than 44px tap targets.
 - **Performance:** target 60 FPS with 20 players. Mining blocks are `Part` instances, not `Terrain`. Use chunk streaming, part pooling, and `CollectionService` tags. No per-frame `FindFirstChild` in hot paths.
@@ -147,28 +148,32 @@ Define these as strongly typed Luau tables. All balance numbers live in config �
 ```lua
 -- OreConfig entry
 {
-  id = "espressone_ore",
-  displayName = "Espressone Shard",
+  id = "cappuccino_ore",
+  displayName = "Cappuccino Shard",
   rarity = "Rare",              -- Common/Uncommon/Rare/Epic/Legendary/Mythic
   color = Color3.fromRGB(...),
-  baseValue = 45,               -- coins per unit when sold raw
+  baseValue = 62,               -- coins per unit when sold raw
   hardness = 3,                 -- HP multiplier for the block
-  weightPerUnit = 1,            -- backpack space consumed
+  weightPerUnit = 2,            -- backpack space consumed
   layers = { [3] = 40, [4] = 25 }, -- layerIndex -> spawn weight
-  convertsTo = { "espressone_squalino", "espressone_squalino_gold" },
+  convertsTo = { "cappuccino_assassino", "ballerina_cappuccina" },
 }
 
 -- BrainrotConfig entry
 {
-  id = "espressone_squalino",
-  displayName = "Espressone Squalino",
-  rarity = "Rare",
-  incomePerSecond = 12,
-  sellValue = 900,
+  id = "cappuccino_assassino",
+  displayName = "Cappuccino Assassino",
+  rarity = "Uncommon",
+  incomePerSecond = 7.8,
+  sellValue = 608,
   mutations = { Normal = 1.0, Golden = 2.5, Diamond = 6.0, Glitched = 15.0 },
-  modelBuilder = "buildEspressoneSqualino", -- function name in ModelFactory
+  modelBuilder = "buildCappuccinoAssassino", -- function name in ModelFactory
 }
 ```
+
+`convertsTo` holds **plain** character ids. Gold, Diamond and Glitched are
+mutation tiers rolled separately, not separate characters — otherwise a golden
+roll of a `_gold` variant would count gold twice.
 
 Ship **6 depth layers** (Topsoil, Stonecore, Ironvein, Crystalis, Magmadeep, The Static), **at least 18 ores**, and **at least 24 brainrots** spread across rarities, plus a 4-tier mutation system that multiplies income and applies a visual effect (gold tint, sparkle particles, chromatic shader-ish highlight).
 
