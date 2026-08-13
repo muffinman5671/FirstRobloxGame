@@ -163,7 +163,13 @@ Damage per second at tier 20 is ~11,175. The toughest block in the game
 
 ## Conversion odds
 
-One roll costs **15 units of a single ore type**.
+One roll costs **20 units of a single ore type**.
+
+> **Ceiling worth knowing:** the starter backpack holds 25 weight, and Topsoil's
+> two ores split roughly 59/41, so the largest single-type stack one trip can
+> produce is about **15 units**. A conversion cost far above that gates the
+> first roll behind a backpack upgrade instead of behind mining. 20 is
+> deliberately just past one trip and comfortably inside two.
 
 | Rarity | Base | Feeding Cappuccino Shard |
 | --- | --- | --- |
@@ -183,8 +189,9 @@ working as intended — feeding a rare ore is how you bias toward rare outcomes.
 Every character stays reachable from every ore. A Common ore can still produce
 a Mythic, which is what keeps early conversions worth doing.
 
-**Pity:** after 25 rolls without an Epic-or-better, the next roll is guaranteed
-to be one. `RarityTest` asserts the gap never exceeds 25 over 30,000 rolls.
+**Pity:** after 16 rolls without an Epic-or-better, the next roll is guaranteed
+to be one. `RarityTest` asserts the gap never exceeds the configured threshold
+over 30,000 rolls.
 
 ### Mutations
 
@@ -264,15 +271,46 @@ the game running is always better than not, but returning still pays.
 
 ---
 
-## Targets (§7) — not yet measured
+## Targets (§7) — measured
 
-| Milestone | Target |
-| --- | --- |
-| First conversion | ~2 min |
-| Layer 2 | ~8 min |
-| First Epic brainrot | ~20 min |
-| First rebirth | ~60–75 min |
+| Milestone | Target | Measured (avg) | Range | Ratio |
+| --- | --- | --- | --- | --- |
+| First conversion | ~2 min | **1.5 min** | 0.9–1.9 | 0.73× |
+| Layer 2 | ~8 min | **9.2 min** | 6.2–13.1 | 1.15× |
+| First Epic+ brainrot | ~20 min | **22.3 min** | 10.0–36.2 | 1.11× |
+| First rebirth | ~60–75 min | **57.4 min** | 35.9–76.8 | 0.86× |
 
-The config is tuned toward these, and the curve relationships are asserted by
-`EconomyTest`, but **no timed playthrough has been done**. Every system now
-exists to measure them, so this is the next thing worth checking before launch.
+All four land within ±30% of target.
+
+### How this was measured, and what it isn't
+
+A **model**, not a human playthrough. It runs the real config and the real
+shared `Conversion` module — the same outcome table and pity the server rolls —
+and computes mining time analytically from pickaxe power against block HP.
+Averaged over 12 seeded runs.
+
+Simulated player policy: always mine the deepest unlocked layer, roll whenever
+a conversion is affordable and then convert ~40% of any surplus stack, hold
+back the stack being saved toward the next roll rather than selling it, buy the
+cheapest available upgrade, and stop upgrading once within reach of a rebirth.
+Overhead is a flat 12s per round trip plus 2s per menu interaction.
+
+**Where to distrust these numbers:**
+
+- **Travel time does not grow with depth.** A flat 12s trip is about right at
+  Topsoil and clearly wrong at 700 studs down. Late-game figures, especially
+  first rebirth, are optimistic.
+- **The model plays well.** It never misclicks, never wanders, never stops to
+  read anything. Real players are slower.
+- **Variance is wide.** First Epic ranged 10.0–36.2 min across seeds, driven by
+  conversion luck. The averages are far steadier than any one player's
+  experience.
+
+The tuning history is worth keeping: `ConversionOreCost` was originally 15
+(first conversion ~1.0 min, too fast), briefly 25 (~2.3 min, but it dragged
+every later milestone), and settled at 20 after sweeping seven cost/pity
+combinations rather than guessing. `PityThreshold` went 25 → 16 for the same
+reason — at 25 the first Epic modelled at ~28.6 min.
+
+A real timed playthrough is still worth doing before launch. This narrows where
+to look; it does not replace playing the game.

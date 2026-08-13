@@ -14,6 +14,7 @@
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
+local GameConfig = require(ReplicatedStorage.Shared.Config.GameConfig)
 local LayerConfig = require(ReplicatedStorage.Shared.Config.LayerConfig)
 local OreConfig = require(ReplicatedStorage.Shared.Config.OreConfig)
 local RemoteRegistry = require(ReplicatedStorage.Shared.Remotes.RemoteRegistry)
@@ -42,10 +43,41 @@ EconomyService.LayerUnlocked = Signal.new()
 -- Currency
 -- ==========================================================================
 
+--[[
+	Coin changes are accumulated and flushed on a timer rather than pushed per
+	call. `award` is called once per second per player by IncomeService, which
+	is fine, but any loop awarding coins would otherwise fire a remote per
+	iteration -- that is what wedged a Studio session during balance modelling.
+
+	The in-process CoinsChanged signal still fires immediately: server-side
+	listeners (LeaderboardService) want every delta, and they cost nothing.
+	Only the network push is batched.
+]]
+local pendingDelta: { [Player]: number } = {}
+
 local function pushCoins(player: Player, delta: number, total: number)
-	RemoteRegistry.event("CoinsChanged"):FireClient(player, total, delta)
+	pendingDelta[player] = (pendingDelta[player] or 0) + delta
 	EconomyService.CoinsChanged:Fire(player, delta, total)
 end
+
+-- Sends whatever has accumulated. Safe to call when nothing is pending.
+local function flushCoins(player: Player)
+	local delta = pendingDelta[player]
+	if not delta or delta == 0 then
+		pendingDelta[player] = nil
+		return
+	end
+	pendingDelta[player] = nil
+
+	local profile = DataService.get(player)
+	if profile then
+		RemoteRegistry.event("CoinsChanged"):FireClient(player, profile.coins, delta)
+	end
+end
+
+-- Exposed so a high-stakes change (a purchase, a rebirth) can land instantly
+-- rather than waiting up to CoinsPushIntervalSeconds.
+EconomyService.flushCoins = flushCoins
 
 function EconomyService.getCoins(player: Player): number
 	local profile = DataService.get(player)
@@ -147,6 +179,9 @@ function EconomyService.sell(player: Player, oreId: string?): PurchaseResult
 	payout = math.floor(payout * ToolConfig.rebirthMultiplier(profile.rebirths))
 	EconomyService.award(player, payout)
 
+	-- A sale is a deliberate action; the number should move now, not on the
+	-- next flush tick.
+	flushCoins(player)
 	DataService.pushSnapshot(player)
 	return { ok = true, coins = DataService.get(player).coins }
 end
@@ -213,6 +248,7 @@ function EconomyService.unlockLayer(player: Player, layerIndex: any): PurchaseRe
 	RemoteRegistry.event("NotifyToast"):FireClient(player, "layer_unlocked", `{layer.displayName} unlocked`)
 	EconomyService.LayerUnlocked:Fire(player, layerIndex)
 
+	flushCoins(player)
 	DataService.saveNow(player)
 	DataService.pushSnapshot(player)
 	return { ok = true, coins = DataService.get(player).coins }
@@ -267,6 +303,7 @@ function EconomyService.rebirth(player: Player): PurchaseResult
 	)
 
 	-- High-stakes and irreversible; write it before anything else can go wrong.
+	flushCoins(player)
 	DataService.saveNow(player)
 	DataService.pushSnapshot(player)
 	return { ok = true, coins = 0 }
@@ -283,6 +320,25 @@ function EconomyService.Init()
 end
 
 function EconomyService.Start()
+	-- Flush loop. One pass per interval over players with something pending.
+	task.spawn(function()
+		while true do
+			task.wait(GameConfig.CoinsPushIntervalSeconds)
+			for player in pendingDelta do
+				if player.Parent then
+					flushCoins(player)
+				else
+					pendingDelta[player] = nil
+				end
+			end
+		end
+	end)
+
+	-- Never leave a delta stranded on a player who left.
+	DataService.ProfileReleased:Connect(function(player: Player)
+		pendingDelta[player] = nil
+	end)
+
 	RemoteRegistry.func("RequestSell").OnServerInvoke = function(player, oreId)
 		if not AntiCheatService.guard(player, "RequestSell") then
 			return { ok = false, reason = "rate_limited" }

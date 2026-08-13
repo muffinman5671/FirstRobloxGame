@@ -92,6 +92,9 @@ local function buyTool(player: Player, itemId: string): PurchaseResult
 	ShopService.Purchased:Fire(player, itemId)
 	RemoteRegistry.event("NotifyToast"):FireClient(player, "purchase", `Bought {def.displayName}`)
 
+	-- Push the deducted balance now rather than on the next batched flush; a
+	-- purchase that doesn't visibly cost anything feels broken.
+	EconomyService.flushCoins(player)
 	DataService.saveNow(player)
 	DataService.pushSnapshot(player)
 	return { ok = true, coins = DataService.get(player).coins }
@@ -123,6 +126,9 @@ local function buyPlotSlot(player: Player): PurchaseResult
 	ShopService.Purchased:Fire(player, PLOT_SLOT_ID)
 	RemoteRegistry.event("NotifyToast"):FireClient(player, "purchase", `Podium slots: {slots}`)
 
+	-- Push the deducted balance now rather than on the next batched flush; a
+	-- purchase that doesn't visibly cost anything feels broken.
+	EconomyService.flushCoins(player)
 	DataService.saveNow(player)
 	DataService.pushSnapshot(player)
 	return { ok = true, coins = DataService.get(player).coins }

@@ -238,6 +238,19 @@ GameConfig.OreYieldMax = 2
 -- Passive income accrual interval, in seconds. The doc's 1s heartbeat.
 GameConfig.IncomeTickSeconds = 1
 
+--[[
+	How often accumulated coin changes are pushed to the client.
+
+	EconomyService.award used to fire a CoinsChanged remote on every call. That
+	is harmless at one call per second from income, but any code path awarding
+	coins in a loop floods the client -- a balance simulation doing exactly that
+	locked up a Studio session during development. Deltas are now accumulated
+	and flushed on this interval instead.
+
+	5 pushes per second is well past what a coin counter needs to feel live.
+]]
+GameConfig.CoinsPushIntervalSeconds = 0.2
+
 -- How often the streamer re-evaluates which chunks should exist. Twice a second
 -- is well under how fast a player can cross ChunkStreamRadius.
 GameConfig.ChunkStreamTickSeconds = 0.5
@@ -274,12 +287,32 @@ GameConfig.DebugMining = false
 -- Conversion
 -- ==========================================================================
 
--- Ore units consumed by one Conversion Chamber roll.
-GameConfig.ConversionOreCost = 15
+--[[
+	Ore units consumed by one Conversion Chamber roll.
 
--- Rolls without an Epic-or-better result before the next roll is guaranteed to
--- be Epic+. Lower = friendlier, and directly moves the "first Epic" milestone.
-GameConfig.PityThreshold = 25
+	Chosen by sweeping this against the §7 milestones, not by intuition. 15 put
+	the first conversion at ~1 min against a ~2 min target; 25 pushed it to
+	~2.3 min but dragged every later milestone with it.
+
+	There is a hard ceiling here worth knowing about. The starter backpack holds
+	25 weight, and Topsoil's two ores split roughly 59/41, so the largest
+	single-type stack one trip can produce is about 15 units. A cost far above
+	that gates the first conversion behind a backpack upgrade rather than behind
+	mining, which is not the intended early loop.
+]]
+GameConfig.ConversionOreCost = 20
+
+--[[
+	Rolls without an Epic-or-better result before the next is guaranteed to be
+	Epic+. Lower is friendlier, and this is the reliable lever on the "first
+	Epic" milestone -- raising Epic's roll weight would move every later
+	milestone too.
+
+	16 rather than 20 or 25: at 20 the first Epic modelled at ~28.6 min against
+	a ~20 min target; 16 brings it to ~22.9 without measurably touching the
+	rebirth timing.
+]]
+GameConfig.PityThreshold = 16
 GameConfig.PityMinimumRarity = "Epic"
 
 -- How strongly the fed ore biases the outcome table. The ore's own convertsTo
