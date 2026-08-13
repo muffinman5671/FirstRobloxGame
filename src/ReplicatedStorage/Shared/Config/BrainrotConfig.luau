@@ -36,12 +36,45 @@ BrainrotConfig.MUTATIONS = table.freeze({
 
 BrainrotConfig.MUTATION_ORDER = table.freeze({ "Normal", "Golden", "Diamond", "Glitched" })
 
--- Visual treatment per mutation, applied by ModelFactory and EffectsController.
+--[[
+	Visual treatment per mutation, applied by ModelFactory and EffectsController.
+
+	`material` overrides the character's own so a tier is readable from across
+	the plot rather than only up close. Deliberately avoids Neon and Glass, per
+	the art direction: Metal and Ice still read as flat blocks at a distance.
+
+	`chromatic` shifts each part's hue by a different amount, which is what
+	makes Glitched look wrong on purpose rather than merely purple.
+]]
 BrainrotConfig.MUTATION_STYLE = table.freeze({
-	Normal = { tint = Color3.fromRGB(255, 255, 255), sparkle = false, chromatic = false },
-	Golden = { tint = Color3.fromRGB(255, 208, 92), sparkle = false, chromatic = false },
-	Diamond = { tint = Color3.fromRGB(168, 236, 255), sparkle = true, chromatic = false },
-	Glitched = { tint = Color3.fromRGB(196, 92, 255), sparkle = true, chromatic = true },
+	Normal = {
+		tint = Color3.fromRGB(255, 255, 255),
+		blend = 0,
+		material = nil,
+		sparkle = false,
+		chromatic = false,
+	},
+	Golden = {
+		tint = Color3.fromRGB(255, 198, 64),
+		blend = 0.78,
+		material = Enum.Material.Metal,
+		sparkle = false,
+		chromatic = false,
+	},
+	Diamond = {
+		tint = Color3.fromRGB(176, 240, 255),
+		blend = 0.72,
+		material = Enum.Material.Ice,
+		sparkle = true,
+		chromatic = false,
+	},
+	Glitched = {
+		tint = Color3.fromRGB(206, 84, 255),
+		blend = 0.55,
+		material = Enum.Material.Foil,
+		sparkle = true,
+		chromatic = true,
+	},
 })
 
 local M = BrainrotConfig.MUTATIONS
