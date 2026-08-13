@@ -492,7 +492,7 @@ local function saveProfile(player: Player, release: boolean): boolean
 
 	local payload = deepCopy(session.profile)
 
-	local ok = updateAsync(keyFor(player.UserId), `save {player.UserId}`, function(existing)
+	local ok, document = updateAsync(keyFor(player.UserId), `save {player.UserId}`, function(existing)
 		local doc: StoredDocument = existing or { data = payload, lock = nil }
 
 		-- If our lock was stolen while we were live, don't clobber whoever owns
@@ -507,10 +507,23 @@ local function saveProfile(player: Player, release: boolean): boolean
 		return doc
 	end)
 
-	if ok then
+	--[[
+		A cancelled transform is NOT a successful save. UpdateAsync returns nil
+		when the transform returns nil, and the surrounding pcall succeeds
+		either way -- so `ok` alone is true even when nothing was written.
+
+		Treating that as success had two consequences, both found by testing
+		against a real DataStore rather than the in-memory fallback:
+		  - saveNow() reported true when it had written nothing
+		  - session.dirty was cleared, so the autosave loop stopped retrying and
+		    the player's progress was never written again, even once the
+		    conflicting lock went stale
+	]]
+	local wrote = ok and document ~= nil
+	if wrote then
 		session.dirty = false
 	end
-	return ok
+	return wrote
 end
 
 local function releaseProfile(player: Player)
