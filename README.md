@@ -188,17 +188,44 @@ Covers weighted-roll distribution over 100k seeded rolls, the pity guarantee,
 number formatting, the generated tool curves against their config constants,
 and conversion odds. 108 assertions.
 
+## Verified against live infrastructure
+
+The place is published and Studio Access to API Services is enabled, so the
+DataStore path has been exercised for real rather than against the in-memory
+fallback:
+
+- Write/read round trip, with nested dictionaries and arrays intact
+- Session lock written alongside the data, carrying jobId and placeId, with the
+  heartbeat advancing on each save
+- Stale-lock takeover after the 15-minute window
+- Refusal to clobber a lock held by a live server, leaving both that lock and
+  its data untouched
+- Release on leave — after the session ends the final data is written and
+  `lock` is `nil`, so a rejoin is not blocked
+- OrderedDataStore reachable, so the leaderboards rank real data
+
+This is worth doing rather than trusting: it caught a silent data-loss bug that
+108 unit assertions and every prior play test had missed. `UpdateAsync` returns
+`nil` when its transform returns `nil`, and the surrounding `pcall` succeeds
+either way — so a save that deliberately backed off from a foreign lock looked
+identical to one that wrote. It reported success **and cleared the dirty flag**,
+so the autosave loop stopped retrying and that player's progress would never
+have been written again. The in-memory fallback cannot reproduce it, because it
+never returns `nil` from a cancelled transform.
+
 ## Known gaps
 
-Two things are written and unit-tested but have **never run against real
-infrastructure**, because Studio uses the in-memory fallback:
-
-- **DataStore persistence and session locking.** Stale-lock takeover, the
-  refusal to clobber a stolen lock, and `BindToClose` release are unexercised.
-  Needs a published place with API access, ideally two servers.
-- **OrderedDataStore leaderboards.** The boards fall back to ranking the
-  current server's players in Studio.
-
-The §7 balance targets (first conversion ~2 min, layer 2 ~8 min, first Epic
-~20 min, first rebirth ~60–75 min) are tuned toward but **unmeasured** — no
-timed playthrough has been done. See BALANCE.md.
+- **True multi-server contention is still untested.** Everything above ran on a
+  single Studio server with a synthesised JobId. Two live servers racing for the
+  same profile — the scenario session locking exists for — cannot be reproduced
+  from Studio. The logic is exercised; the concurrency is not.
+- **`BindToClose` under a real shutdown.** Verified via stopping Play, which
+  fires the same path, but not against an actual server shutdown with the 30
+  second budget Roblox allows.
+- **No human playthrough.** The §7 balance targets are *modelled*, not played —
+  see the measured table and its caveats in BALANCE.md. The model does not grow
+  travel time with depth and plays optimally, so late-game figures are
+  optimistic.
+- **Art is blockout only.** Every brainrot is a primitive silhouette marked
+  `-- ART TODO` in `ModelFactory`, and there are no sounds, because every Roblox
+  sound needs an asset ID and the project hardcodes none.
