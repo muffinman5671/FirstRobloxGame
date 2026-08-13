@@ -21,7 +21,6 @@ local BrainrotConfig = require(ReplicatedStorage.Shared.Config.BrainrotConfig)
 local Format = require(ReplicatedStorage.Shared.Modules.Format)
 local GameConfig = require(ReplicatedStorage.Shared.Config.GameConfig)
 local ModelFactory = require(ReplicatedStorage.Shared.Modules.ModelFactory)
-local RateLimiter = require(ReplicatedStorage.Shared.Modules.RateLimiter)
 local Rarity = require(ReplicatedStorage.Shared.Modules.Rarity)
 local RemoteRegistry = require(ReplicatedStorage.Shared.Remotes.RemoteRegistry)
 local Signal = require(ReplicatedStorage.Shared.Modules.Signal)
@@ -35,6 +34,7 @@ type PurchaseResult = SharedTypes.PurchaseResult
 local PlotService = {}
 PlotService.Name = "PlotService"
 
+local AntiCheatService
 local DataService
 local EconomyService
 
@@ -59,8 +59,6 @@ local plots: { Plot } = {}
 local byPlayer: { [Player]: Plot } = {}
 local plotFolder: Folder
 
-local placeLimiter = RateLimiter.new("RequestPlace", 8, 1)
-local sellLimiter = RateLimiter.new("RequestSellBrainrot", 6, 1)
 
 -- ==========================================================================
 -- Construction
@@ -457,6 +455,7 @@ end
 -- ==========================================================================
 
 function PlotService.Init()
+	AntiCheatService = require(script.Parent.AntiCheatService)
 	DataService = require(script.Parent.DataService)
 	EconomyService = require(script.Parent.EconomyService)
 
@@ -471,21 +470,21 @@ function PlotService.Start()
 	end
 
 	RemoteRegistry.func("RequestPlace").OnServerInvoke = function(player, uid, slot)
-		if not placeLimiter:check(player) then
+		if not AntiCheatService.guard(player, "RequestPlace") then
 			return { ok = false, reason = "rate_limited" }
 		end
 		return PlotService.place(player, uid, slot)
 	end
 
 	RemoteRegistry.func("RequestUnplace").OnServerInvoke = function(player, slot)
-		if not placeLimiter:check(player) then
+		if not AntiCheatService.guard(player, "RequestUnplace") then
 			return { ok = false, reason = "rate_limited" }
 		end
 		return PlotService.unplace(player, slot)
 	end
 
 	RemoteRegistry.func("RequestSellBrainrot").OnServerInvoke = function(player, uid)
-		if not sellLimiter:check(player) then
+		if not AntiCheatService.guard(player, "RequestSellBrainrot") then
 			return { ok = false, reason = "rate_limited" }
 		end
 		return PlotService.sellBrainrot(player, uid)
@@ -504,8 +503,6 @@ function PlotService.Start()
 
 	DataService.ProfileReleased:Connect(function(player: Player)
 		release(player)
-		placeLimiter:forget(player)
-		sellLimiter:forget(player)
 	end)
 
 	Players.PlayerRemoving:Connect(function(player)

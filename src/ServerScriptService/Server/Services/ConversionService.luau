@@ -18,14 +18,12 @@
 ]]
 
 local HttpService = game:GetService("HttpService")
-local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local BrainrotConfig = require(ReplicatedStorage.Shared.Config.BrainrotConfig)
 local Conversion = require(ReplicatedStorage.Shared.Modules.Conversion)
 local GameConfig = require(ReplicatedStorage.Shared.Config.GameConfig)
 local OreConfig = require(ReplicatedStorage.Shared.Config.OreConfig)
-local RateLimiter = require(ReplicatedStorage.Shared.Modules.RateLimiter)
 local Rarity = require(ReplicatedStorage.Shared.Modules.Rarity)
 local RemoteRegistry = require(ReplicatedStorage.Shared.Remotes.RemoteRegistry)
 local Signal = require(ReplicatedStorage.Shared.Modules.Signal)
@@ -36,13 +34,12 @@ type ConversionResult = SharedTypes.ConversionResult
 local ConversionService = {}
 ConversionService.Name = "ConversionService"
 
+local AntiCheatService
 local DataService
 local InventoryService
 
 -- (player, brainrotId, mutation, isNewDiscovery)
 ConversionService.Converted = Signal.new()
-
-local convertLimiter = RateLimiter.new("RequestConvert", 4, 1)
 
 -- Seeded per server, not per call: constructing a Random per roll is both
 -- wasteful and a classic source of correlated results.
@@ -156,21 +153,22 @@ end
 -- ==========================================================================
 
 function ConversionService.Init()
+	AntiCheatService = require(script.Parent.AntiCheatService)
 	DataService = require(script.Parent.DataService)
 	InventoryService = require(script.Parent.InventoryService)
 end
 
 function ConversionService.Start()
 	RemoteRegistry.func("RequestConvert").OnServerInvoke = function(player, oreId)
-		if not convertLimiter:check(player) then
+		if not AntiCheatService.guard(player, "RequestConvert") then
 			return { ok = false, reason = "rate_limited" }
+		end
+		if not AntiCheatService.isId(oreId) then
+			AntiCheatService.report(player, "bad_convert_payload", typeof(oreId), "severe")
+			return { ok = false, reason = "bad_request" }
 		end
 		return ConversionService.convert(player, oreId)
 	end
-
-	Players.PlayerRemoving:Connect(function(player)
-		convertLimiter:forget(player)
-	end)
 end
 
 -- Exposed for the Tests/ suite.

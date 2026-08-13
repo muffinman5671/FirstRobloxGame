@@ -43,6 +43,10 @@ local equipped = false
 local lastSwingClock = 0
 local aimPosition: Vector2? = nil
 
+-- Cached per spawn. The targeting path runs every frame and must not do
+-- instance lookups; see DESIGN.md §2.
+local rootPart: BasePart? = nil
+
 local raycastParams = RaycastParams.new()
 raycastParams.FilterType = Enum.RaycastFilterType.Include
 raycastParams.IgnoreWater = true
@@ -93,9 +97,10 @@ local function resolveTarget(): (BasePart?, boolean)
 		return nil, false
 	end
 
-	local character = player.Character
-	local root = character and character:FindFirstChild("HumanoidRootPart")
-	if not root or not root:IsA("BasePart") then
+	-- Cached on spawn rather than looked up here: this runs every frame, and
+	-- DESIGN.md §2 forbids per-frame FindFirstChild in hot paths.
+	local root = rootPart
+	if not root or not root.Parent then
 		return nil, false
 	end
 
@@ -393,6 +398,18 @@ local function watchCharacter(character: Model)
 	holding = false
 	equipped = false
 
+	-- The root may not exist yet on a fresh character; wait off-thread so this
+	-- never blocks the boot sequence.
+	rootPart = character:FindFirstChild("HumanoidRootPart") :: BasePart?
+	if not rootPart then
+		task.spawn(function()
+			local found = character:WaitForChild("HumanoidRootPart", 10)
+			if found and found:IsA("BasePart") and player.Character == character then
+				rootPart = found
+			end
+		end)
+	end
+
 	for _, item in character:GetChildren() do
 		if item:IsA("Tool") and item:GetAttribute("MiningPickaxe") then
 			bindTool(item)
@@ -486,6 +503,7 @@ function MiningController.Start()
 		holding = false
 		equipped = false
 		activeTool = nil
+		rootPart = nil
 		showTarget(nil, false)
 		showHealth(nil)
 	end)

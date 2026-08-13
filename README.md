@@ -169,7 +169,36 @@ DESIGN.md §2.
 | Phase | Scope | State |
 | --- | --- | --- |
 | A | Project scaffold, configs, DataService | Done |
-| B | Mine generation, mining | Not started |
-| C | Inventory, economy, shop | Not started |
-| D | Conversion, plots, income | Not started |
-| E | UI polish, effects, leaderboards, tests | Not started |
+| B | Mine generation, mining | Done |
+| C | Inventory, economy, shop | Done |
+| D | Conversion, plots, income | Done |
+| E | UI polish, effects, leaderboards, tests | Done |
+
+11 server services, 4 client controllers, 7 UI modules.
+
+## Tests
+
+Plain-Luau assertion suites, no framework. Run from the Studio command bar:
+
+```lua
+print(require(game.ReplicatedStorage.Shared.Tests.TestRunner).runAll())
+```
+
+Covers weighted-roll distribution over 100k seeded rolls, the pity guarantee,
+number formatting, the generated tool curves against their config constants,
+and conversion odds. 108 assertions.
+
+## Known gaps
+
+Two things are written and unit-tested but have **never run against real
+infrastructure**, because Studio uses the in-memory fallback:
+
+- **DataStore persistence and session locking.** Stale-lock takeover, the
+  refusal to clobber a stolen lock, and `BindToClose` release are unexercised.
+  Needs a published place with API access, ideally two servers.
+- **OrderedDataStore leaderboards.** The boards fall back to ranking the
+  current server's players in Studio.
+
+The §7 balance targets (first conversion ~2 min, layer 2 ~8 min, first Epic
+~20 min, first rebirth ~60–75 min) are tuned toward but **unmeasured** — no
+timed playthrough has been done. See BALANCE.md.

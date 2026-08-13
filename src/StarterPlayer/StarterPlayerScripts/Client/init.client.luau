@@ -4,8 +4,8 @@
 	Mirrors the server's two-phase boot. Controllers live under Controllers/ and
 	expose an optional Init() and Start().
 
-	Remaining phases append here in this order:
-	  UIController, EffectsController, NotifyController
+	Order matters here: UIController.Init creates the ScreenGui that
+	NotifyController.Init attaches its toast container to.
 ]]
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -22,6 +22,8 @@ export type Controller = {
 local CONTROLLER_ORDER: { string } = {
 	"MiningController",
 	"UIController",
+	"NotifyController",
+	"EffectsController",
 }
 
 -- Blocks until the server's remote folder has replicated, so no controller has

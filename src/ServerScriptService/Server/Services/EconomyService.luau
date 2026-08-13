@@ -12,12 +12,10 @@
 	those purchases spend.
 ]]
 
-local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local LayerConfig = require(ReplicatedStorage.Shared.Config.LayerConfig)
 local OreConfig = require(ReplicatedStorage.Shared.Config.OreConfig)
-local RateLimiter = require(ReplicatedStorage.Shared.Modules.RateLimiter)
 local RemoteRegistry = require(ReplicatedStorage.Shared.Remotes.RemoteRegistry)
 local Signal = require(ReplicatedStorage.Shared.Modules.Signal)
 local SharedTypes = require(ReplicatedStorage.Shared.Modules.SharedTypes)
@@ -29,6 +27,7 @@ type PurchaseResult = SharedTypes.PurchaseResult
 local EconomyService = {}
 EconomyService.Name = "EconomyService"
 
+local AntiCheatService
 local DataService
 local InventoryService
 
@@ -38,10 +37,6 @@ EconomyService.CoinsChanged = Signal.new()
 EconomyService.Rebirthed = Signal.new()
 -- (player, layerIndex)
 EconomyService.LayerUnlocked = Signal.new()
-
-local sellLimiter = RateLimiter.new("RequestSell", 8, 1)
-local unlockLimiter = RateLimiter.new("RequestUnlockLayer", 4, 1)
-local rebirthLimiter = RateLimiter.new("RequestRebirth", 2, 2)
 
 -- ==========================================================================
 -- Currency
@@ -282,40 +277,36 @@ end
 -- ==========================================================================
 
 function EconomyService.Init()
+	AntiCheatService = require(script.Parent.AntiCheatService)
 	DataService = require(script.Parent.DataService)
 	InventoryService = require(script.Parent.InventoryService)
 end
 
 function EconomyService.Start()
 	RemoteRegistry.func("RequestSell").OnServerInvoke = function(player, oreId)
-		if not sellLimiter:check(player) then
+		if not AntiCheatService.guard(player, "RequestSell") then
 			return { ok = false, reason = "rate_limited" }
 		end
-		if oreId ~= nil and type(oreId) ~= "string" then
+		if oreId ~= nil and not AntiCheatService.isId(oreId) then
+			AntiCheatService.report(player, "bad_sell_payload", typeof(oreId), "severe")
 			return { ok = false, reason = "bad_request" }
 		end
 		return EconomyService.sell(player, oreId)
 	end
 
 	RemoteRegistry.func("RequestUnlockLayer").OnServerInvoke = function(player, layerIndex)
-		if not unlockLimiter:check(player) then
+		if not AntiCheatService.guard(player, "RequestUnlockLayer") then
 			return { ok = false, reason = "rate_limited" }
 		end
 		return EconomyService.unlockLayer(player, layerIndex)
 	end
 
 	RemoteRegistry.func("RequestRebirth").OnServerInvoke = function(player)
-		if not rebirthLimiter:check(player) then
+		if not AntiCheatService.guard(player, "RequestRebirth") then
 			return { ok = false, reason = "rate_limited" }
 		end
 		return EconomyService.rebirth(player)
 	end
-
-	Players.PlayerRemoving:Connect(function(player)
-		sellLimiter:forget(player)
-		unlockLimiter:forget(player)
-		rebirthLimiter:forget(player)
-	end)
 end
 
 return EconomyService

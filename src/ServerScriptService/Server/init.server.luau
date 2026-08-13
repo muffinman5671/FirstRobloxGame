@@ -17,7 +17,6 @@
 ]]
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local ServerScriptService = game:GetService("ServerScriptService")
 
 local RemoteRegistry = require(ReplicatedStorage.Shared.Remotes.RemoteRegistry)
 
@@ -36,11 +35,12 @@ export type Service = {
 	Boot order. Dependencies point upward: a service may depend on anything
 	above it during Start, and on nothing during Init.
 
-	Remaining phases append here in this order:
-	  AntiCheatService, LeaderboardService
+	AntiCheatService boots early because every other service's remote handlers
+	call into it.
 ]]
 local BOOT_ORDER = {
 	"DataService",
+	"AntiCheatService",
 	"MineService",
 	"InventoryService",
 	"MiningService",
@@ -49,6 +49,7 @@ local BOOT_ORDER = {
 	"ConversionService",
 	"PlotService",
 	"IncomeService",
+	"LeaderboardService",
 }
 
 local servicesFolder = script:WaitForChild("Services")

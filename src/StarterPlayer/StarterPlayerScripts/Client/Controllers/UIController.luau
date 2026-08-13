@@ -17,9 +17,11 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 
 local ConvertFrame = require(script.Parent.Parent.UI.ConvertFrame)
-local Format = require(ReplicatedStorage.Shared.Modules.Format)
 local HUD = require(script.Parent.Parent.UI.HUD)
+local IndexFrame = require(script.Parent.Parent.UI.IndexFrame)
 local InventoryFrame = require(script.Parent.Parent.UI.InventoryFrame)
+local NotifyController = require(script.Parent.NotifyController)
+local RebirthFrame = require(script.Parent.Parent.UI.RebirthFrame)
 local RemoteRegistry = require(ReplicatedStorage.Shared.Remotes.RemoteRegistry)
 local SharedTypes = require(ReplicatedStorage.Shared.Modules.SharedTypes)
 local ShopFrame = require(script.Parent.Parent.UI.ShopFrame)
@@ -36,9 +38,7 @@ local trove = Trove.new()
 
 local snapshot: ProfileSnapshot? = nil
 local screen: ScreenGui
-local hud, inventory, shop, convert
-local toastLabel: TextLabel
-local toastUntil = 0
+local hud, inventory, shop, convert, index, rebirth
 
 -- Human-readable text for the refusal reasons the server sends back. An
 -- unmapped reason falls through to the raw string rather than being swallowed,
@@ -70,16 +70,8 @@ local REASON_TEXT: { [string]: string } = {
 	bad_layer = "Something went wrong",
 }
 
--- ==========================================================================
--- Toasts
--- ==========================================================================
-
-local function toast(message: string, color: Color3?)
-	toastLabel.Text = message
-	toastLabel.TextColor3 = color or Theme.COLOR.text
-	toastLabel.Visible = true
-	toastUntil = os.clock() + 2.5
-end
+-- Notifications belong to NotifyController; this is just a shorthand.
+local toast = NotifyController.toast
 
 -- ==========================================================================
 -- Snapshot
@@ -90,6 +82,8 @@ local function render()
 	inventory:update(snapshot)
 	shop:update(snapshot)
 	convert:update(snapshot)
+	index:update(snapshot)
+	rebirth:update(snapshot)
 end
 
 local function setSnapshot(next: ProfileSnapshot?)
@@ -165,30 +159,32 @@ function UIController.Init()
 	inventory = InventoryFrame.new(screen)
 	shop = ShopFrame.new(screen)
 	convert = ConvertFrame.new(screen)
-
-	toastLabel = Theme.label("", {
-		Name = "Toast",
-		Size = UDim2.new(0, 420, 0, 32),
-		Position = UDim2.new(0.5, -210, 0, 12),
-		BackgroundColor3 = Theme.COLOR.panelSunken,
-		BackgroundTransparency = 0,
-		TextXAlignment = Enum.TextXAlignment.Center,
-		Visible = false,
-		ZIndex = 10,
-	})
-	toastLabel.Parent = screen
+	index = IndexFrame.new(screen)
+	rebirth = RebirthFrame.new(screen)
 end
 
 function UIController.Start()
 	-- Only one panel at a time; two overlapping modals on a phone is unusable.
+	-- One panel at a time; clicking the open one closes it. Two overlapping
+	-- modals on a phone is unusable.
+	local panels = {
+		inventory = inventory,
+		shop = shop,
+		convert = convert,
+		index = index,
+		rebirth = rebirth,
+	}
+
 	hud:onOpen(function(which)
-		-- One panel at a time; clicking the open one closes it.
-		local openInventory = which == "inventory" and not inventory.instance.Visible
-		local openShop = which == "shop" and not shop.instance.Visible
-		local openConvert = which == "convert" and not convert.instance.Visible
-		inventory:setVisible(openInventory)
-		shop:setVisible(openShop)
-		convert:setVisible(openConvert)
+		local target = panels[which]
+		local opening = target ~= nil and not target.instance.Visible
+		for name, panel in panels do
+			panel:setVisible(opening and name == which)
+		end
+	end)
+
+	rebirth:onRebirth(function()
+		request("RequestRebirth")
 	end)
 
 	inventory:onSell(function(oreId)
@@ -239,14 +235,9 @@ function UIController.Start()
 		end
 	end)
 
-	trove:Connect(RemoteRegistry.event("NotifyToast").OnClientEvent, function(kind: string, message: string)
-		toast(message, if kind == "purchase" or kind == "layer_unlocked" then Theme.COLOR.accent else Theme.COLOR.warn)
-	end)
-
-	trove:Connect(RemoteRegistry.event("BackpackFull").OnClientEvent, function()
-		toast("Backpack full -- sell your ore", Theme.COLOR.warn)
-	end)
-
+	-- NotifyToast, BackpackFull, PlotAssigned, and OfflineEarnings are handled
+	-- by NotifyController; this controller only listens to what changes state
+	-- it owns.
 	trove:Connect(RemoteRegistry.event("ConversionResult").OnClientEvent, function(result)
 		convert:showReveal(result)
 	end)
@@ -255,22 +246,6 @@ function UIController.Start()
 		-- The server pushes a snapshot alongside this; the toast is the
 		-- immediate acknowledgement so a placement never feels ignored.
 		toast("Plot updated", Theme.COLOR.accent)
-	end)
-
-	trove:Connect(RemoteRegistry.event("PlotAssigned").OnClientEvent, function(index: number)
-		toast(`Plot {index} is yours`, Theme.COLOR.accent)
-	end)
-
-	-- "While you were away".
-	trove:Connect(RemoteRegistry.event("OfflineEarnings").OnClientEvent, function(payload)
-		if not payload or (payload.coins or 0) <= 0 then
-			return
-		end
-		local suffix = if payload.wasCapped then " (capped)" else ""
-		toast(
-			`While you were away: $${Format.abbreviate(payload.coins)} over {Format.duration(payload.seconds)}{suffix}`,
-			Theme.COLOR.coins
-		)
 	end)
 
 	trove:Connect(RemoteRegistry.event("IncomeTick").OnClientEvent, function(_, rate: number)
@@ -288,13 +263,8 @@ function UIController.Start()
 		end
 	end)
 
-	-- Depth ticks every frame; the toast timer rides along rather than spawning
-	-- a second loop.
 	trove:Connect(RunService.RenderStepped, function()
 		hud:updateDepth()
-		if toastLabel.Visible and os.clock() > toastUntil then
-			toastLabel.Visible = false
-		end
 	end)
 
 	-- First fetch. The profile may still be loading, so retry rather than

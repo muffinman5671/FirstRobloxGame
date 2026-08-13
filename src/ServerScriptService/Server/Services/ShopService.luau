@@ -11,11 +11,9 @@
 	legal and what it grants.
 ]]
 
-local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local GameConfig = require(ReplicatedStorage.Shared.Config.GameConfig)
-local RateLimiter = require(ReplicatedStorage.Shared.Modules.RateLimiter)
 local RemoteRegistry = require(ReplicatedStorage.Shared.Remotes.RemoteRegistry)
 local Signal = require(ReplicatedStorage.Shared.Modules.Signal)
 local SharedTypes = require(ReplicatedStorage.Shared.Modules.SharedTypes)
@@ -26,6 +24,7 @@ type PurchaseResult = SharedTypes.PurchaseResult
 local ShopService = {}
 ShopService.Name = "ShopService"
 
+local AntiCheatService
 local DataService
 local EconomyService
 local MiningService
@@ -34,9 +33,6 @@ local MiningService
 ShopService.Purchased = Signal.new()
 -- (player, itemId)
 ShopService.Equipped = Signal.new()
-
-local purchaseLimiter = RateLimiter.new("RequestPurchase", 6, 1)
-local equipLimiter = RateLimiter.new("RequestEquip", 8, 1)
 
 -- Sentinel id for the podium slot upgrade, which isn't a ToolConfig entry.
 local PLOT_SLOT_ID = "plot_slot"
@@ -205,6 +201,7 @@ end
 -- ==========================================================================
 
 function ShopService.Init()
+	AntiCheatService = require(script.Parent.AntiCheatService)
 	DataService = require(script.Parent.DataService)
 	EconomyService = require(script.Parent.EconomyService)
 	MiningService = require(script.Parent.MiningService)
@@ -212,23 +209,18 @@ end
 
 function ShopService.Start()
 	RemoteRegistry.func("RequestPurchase").OnServerInvoke = function(player, itemId)
-		if not purchaseLimiter:check(player) then
+		if not AntiCheatService.guard(player, "RequestPurchase") then
 			return { ok = false, reason = "rate_limited" }
 		end
 		return ShopService.purchase(player, itemId)
 	end
 
 	RemoteRegistry.func("RequestEquip").OnServerInvoke = function(player, itemId)
-		if not equipLimiter:check(player) then
+		if not AntiCheatService.guard(player, "RequestEquip") then
 			return { ok = false, reason = "rate_limited" }
 		end
 		return ShopService.equip(player, itemId)
 	end
-
-	Players.PlayerRemoving:Connect(function(player)
-		purchaseLimiter:forget(player)
-		equipLimiter:forget(player)
-	end)
 end
 
 return ShopService

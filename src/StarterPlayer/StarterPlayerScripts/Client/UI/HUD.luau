@@ -36,11 +36,32 @@ export type HUD = {
 }
 
 function HUD.new(parent: Instance): HUD
-	local self = setmetatable({ _openCallbacks = {} }, HUD)
+	local self = setmetatable({ _openCallbacks = {}, _root = nil }, HUD)
+
+	-- Cache the root part per spawn so updateDepth never does a lookup.
+	local function bindCharacter(character: Model)
+		self._root = character:FindFirstChild("HumanoidRootPart") :: BasePart?
+		if not self._root then
+			task.spawn(function()
+				local found = character:WaitForChild("HumanoidRootPart", 10)
+				if found and found:IsA("BasePart") and player.Character == character then
+					self._root = found
+				end
+			end)
+		end
+	end
+
+	if player.Character then
+		bindCharacter(player.Character)
+	end
+	player.CharacterAdded:Connect(bindCharacter)
+	player.CharacterRemoving:Connect(function()
+		self._root = nil
+	end)
 
 	local outer, inner = Theme.panel({
 		Name = "HUD",
-		Size = UDim2.fromOffset(300, 186),
+		Size = UDim2.fromOffset(300, 234),
 		Position = UDim2.fromOffset(Theme.METRIC.pad, Theme.METRIC.pad),
 	})
 	outer.Parent = parent
@@ -111,11 +132,27 @@ function HUD.new(parent: Instance): HUD
 	rowLayout.SortOrder = Enum.SortOrder.LayoutOrder
 	rowLayout.Parent = buttonRow
 
-	local screens = { { "Bag", "inventory" }, { "Shop", "shop" }, { "Convert", "convert" } }
+	-- Five screens in one row would give ~52px buttons; the row is two-deep
+	-- instead so every target stays comfortably past the 44px minimum.
+	local screens = {
+		{ "Bag", "inventory" },
+		{ "Shop", "shop" },
+		{ "Convert", "convert" },
+		{ "Index", "index" },
+		{ "Rebirth", "rebirth" },
+	}
+	buttonRow.Size = UDim2.new(1, 0, 0, Theme.METRIC.tapTarget * 2 + 4)
+
+	local grid = Instance.new("UIGridLayout")
+	grid.CellSize = UDim2.new(1 / 3, -4, 0, Theme.METRIC.tapTarget)
+	grid.CellPadding = UDim2.fromOffset(4, 4)
+	grid.SortOrder = Enum.SortOrder.LayoutOrder
+	grid.Parent = buttonRow
+	rowLayout:Destroy()
+
 	for index, spec in screens do
 		local button = Theme.button(spec[1], {
 			LayoutOrder = index,
-			Size = UDim2.new(1 / #screens, -Theme.METRIC.gap * (#screens - 1) / #screens, 1, 0),
 			TextSize = Theme.TEXT_SIZE.small,
 		})
 		button.Parent = buttonRow
@@ -165,11 +202,16 @@ function HUD:update(snapshot: ProfileSnapshot?)
 	self._pickaxe.Text = if pickaxe then pickaxe.displayName else "--"
 end
 
--- Depth changes every frame, so it updates separately from the snapshot.
+--[[
+	Depth changes every frame, so it updates separately from the snapshot.
+
+	The root part is cached on spawn rather than looked up here: this runs on
+	RenderStepped, and DESIGN.md §2 forbids per-frame FindFirstChild in hot
+	paths.
+]]
 function HUD:updateDepth()
-	local character = player.Character
-	local root = character and character:FindFirstChild("HumanoidRootPart")
-	if not root or not root:IsA("BasePart") then
+	local root = self._root
+	if not root or not root.Parent then
 		return
 	end
 
