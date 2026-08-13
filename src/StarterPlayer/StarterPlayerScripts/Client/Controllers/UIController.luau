@@ -16,6 +16,8 @@ local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 
+local ConvertFrame = require(script.Parent.Parent.UI.ConvertFrame)
+local Format = require(ReplicatedStorage.Shared.Modules.Format)
 local HUD = require(script.Parent.Parent.UI.HUD)
 local InventoryFrame = require(script.Parent.Parent.UI.InventoryFrame)
 local RemoteRegistry = require(ReplicatedStorage.Shared.Remotes.RemoteRegistry)
@@ -34,7 +36,7 @@ local trove = Trove.new()
 
 local snapshot: ProfileSnapshot? = nil
 local screen: ScreenGui
-local hud, inventory, shop
+local hud, inventory, shop, convert
 local toastLabel: TextLabel
 local toastUntil = 0
 
@@ -52,6 +54,13 @@ local REASON_TEXT: { [string]: string } = {
 	max_slots = "All podium slots unlocked",
 	nothing_to_sell = "Nothing to sell",
 	none_held = "You don't have any of that",
+	not_enough_ore = "Not enough ore for a roll",
+	no_plot = "No plot assigned yet",
+	slot_not_unlocked = "Buy that podium slot first",
+	slot_occupied = "That podium is taken",
+	slot_empty = "Nothing on that podium",
+	already_placed = "Already on a podium",
+	empty_outcome_table = "Something went wrong",
 	rate_limited = "Slow down",
 	profile_not_loaded = "Still loading your save",
 	unknown_item = "That item doesn't exist",
@@ -80,6 +89,7 @@ local function render()
 	hud:update(snapshot)
 	inventory:update(snapshot)
 	shop:update(snapshot)
+	convert:update(snapshot)
 end
 
 local function setSnapshot(next: ProfileSnapshot?)
@@ -154,6 +164,7 @@ function UIController.Init()
 	hud = HUD.new(screen)
 	inventory = InventoryFrame.new(screen)
 	shop = ShopFrame.new(screen)
+	convert = ConvertFrame.new(screen)
 
 	toastLabel = Theme.label("", {
 		Name = "Toast",
@@ -171,14 +182,36 @@ end
 function UIController.Start()
 	-- Only one panel at a time; two overlapping modals on a phone is unusable.
 	hud:onOpen(function(which)
+		-- One panel at a time; clicking the open one closes it.
 		local openInventory = which == "inventory" and not inventory.instance.Visible
 		local openShop = which == "shop" and not shop.instance.Visible
+		local openConvert = which == "convert" and not convert.instance.Visible
 		inventory:setVisible(openInventory)
 		shop:setVisible(openShop)
+		convert:setVisible(openConvert)
 	end)
 
 	inventory:onSell(function(oreId)
 		request("RequestSell", oreId)
+	end)
+
+	convert:onConvert(function(oreId)
+		-- The reveal is driven by the ConversionResult event rather than this
+		-- return value, so the animation fires the same way however the roll
+		-- was triggered.
+		request("RequestConvert", oreId)
+	end)
+
+	convert:onPlace(function(uid, slot)
+		request("RequestPlace", uid, slot)
+	end)
+
+	convert:onUnplace(function(slot)
+		request("RequestUnplace", slot)
+	end)
+
+	convert:onSellBrainrot(function(uid)
+		request("RequestSellBrainrot", uid)
 	end)
 
 	shop:onPurchase(function(itemId)
@@ -212,6 +245,39 @@ function UIController.Start()
 
 	trove:Connect(RemoteRegistry.event("BackpackFull").OnClientEvent, function()
 		toast("Backpack full -- sell your ore", Theme.COLOR.warn)
+	end)
+
+	trove:Connect(RemoteRegistry.event("ConversionResult").OnClientEvent, function(result)
+		convert:showReveal(result)
+	end)
+
+	trove:Connect(RemoteRegistry.event("PlacementChanged").OnClientEvent, function()
+		-- The server pushes a snapshot alongside this; the toast is the
+		-- immediate acknowledgement so a placement never feels ignored.
+		toast("Plot updated", Theme.COLOR.accent)
+	end)
+
+	trove:Connect(RemoteRegistry.event("PlotAssigned").OnClientEvent, function(index: number)
+		toast(`Plot {index} is yours`, Theme.COLOR.accent)
+	end)
+
+	-- "While you were away".
+	trove:Connect(RemoteRegistry.event("OfflineEarnings").OnClientEvent, function(payload)
+		if not payload or (payload.coins or 0) <= 0 then
+			return
+		end
+		local suffix = if payload.wasCapped then " (capped)" else ""
+		toast(
+			`While you were away: $${Format.abbreviate(payload.coins)} over {Format.duration(payload.seconds)}{suffix}`,
+			Theme.COLOR.coins
+		)
+	end)
+
+	trove:Connect(RemoteRegistry.event("IncomeTick").OnClientEvent, function(_, rate: number)
+		if snapshot then
+			snapshot.incomePerSecond = rate
+			hud:update(snapshot)
+		end
 	end)
 
 	trove:Connect(RemoteRegistry.event("OreCredited").OnClientEvent, function()

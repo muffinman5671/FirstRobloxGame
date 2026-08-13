@@ -111,10 +111,12 @@ function HUD.new(parent: Instance): HUD
 	rowLayout.SortOrder = Enum.SortOrder.LayoutOrder
 	rowLayout.Parent = buttonRow
 
-	for index, spec in { { "Bag", "inventory" }, { "Shop", "shop" } } do
+	local screens = { { "Bag", "inventory" }, { "Shop", "shop" }, { "Convert", "convert" } }
+	for index, spec in screens do
 		local button = Theme.button(spec[1], {
 			LayoutOrder = index,
-			Size = UDim2.new(0.5, -Theme.METRIC.gap / 2, 1, 0),
+			Size = UDim2.new(1 / #screens, -Theme.METRIC.gap * (#screens - 1) / #screens, 1, 0),
+			TextSize = Theme.TEXT_SIZE.small,
 		})
 		button.Parent = buttonRow
 		button.Activated:Connect(function()

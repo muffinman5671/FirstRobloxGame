@@ -286,6 +286,24 @@ GameConfig.PityMinimumRarity = "Epic"
 -- entries get their weight multiplied by this; everything else rolls at base.
 GameConfig.ConversionOreBias = 6
 
+--[[
+	Base roll weight per rarity, before the fed ore's bias is applied. These are
+	the numbers the Convert screen's odds table is computed from, so they are
+	the honest probabilities the doc asks us to show.
+
+	Roughly a 2.7x drop per rarity step, which puts Mythic near 1 in 800 on an
+	unbiased roll -- rare enough to matter, common enough that the pity counter
+	is the floor rather than the only route.
+]]
+GameConfig.ConversionRarityWeights = {
+	Common = 1000,
+	Uncommon = 370,
+	Rare = 135,
+	Epic = 40,
+	Legendary = 11,
+	Mythic = 2,
+}
+
 -- Mutation roll weights. Multipliers themselves live per-brainrot in
 -- BrainrotConfig so a character can opt out of a tier.
 GameConfig.MutationWeights = {
@@ -301,6 +319,33 @@ GameConfig.MutationWeights = {
 
 GameConfig.StartingPlotSlots = 4
 GameConfig.MaxPlotSlots = 24
+
+-- ==========================================================================
+-- Plot geometry
+-- ==========================================================================
+--[[
+	Plots are laid out in a row well clear of the shaft, one per possible
+	player, and built once at boot rather than per join -- claiming a plot then
+	costs a table write instead of building geometry while someone is waiting.
+]]
+
+GameConfig.PlotCount = 20 -- matches the doc's 20-player target
+GameConfig.PlotOrigin = Vector3.new(-600, 0, -200)
+GameConfig.PlotWidth = 96
+GameConfig.PlotDepth = 96
+GameConfig.PlotSpacing = 24 -- gap between neighbouring plots
+GameConfig.PlotWallHeight = 12
+GameConfig.PlotWallThickness = 2
+GameConfig.PlotFloorThickness = 4
+
+-- Podiums are laid out in a grid on the plot floor. 6 x 4 holds MaxPlotSlots.
+GameConfig.PodiumsPerRow = 6
+GameConfig.PodiumSize = Vector3.new(8, 3, 8)
+GameConfig.PodiumSpacing = 14
+
+-- Brainrot models are scaled to roughly this height so a Mythic doesn't
+-- dwarf the plot and a Common isn't invisible.
+GameConfig.BrainrotHeight = 6
 
 -- Offline earnings are accrued at the player's placed-brainrot rate, capped at
 -- this many seconds so a month away doesn't trivialize the economy.
