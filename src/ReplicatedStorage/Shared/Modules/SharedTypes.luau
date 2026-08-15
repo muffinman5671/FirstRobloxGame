@@ -144,6 +144,10 @@ export type SessionLock = {
 	jobId: string,
 	placeId: number,
 	heartbeatUnix: number,
+	-- True when written by a Studio session, which has no real JobId. Lets the
+	-- next Studio session recognise a lock its predecessor left behind; see
+	-- DataService's isLockOurs for why this is one-directional.
+	studio: boolean?,
 }
 
 -- ==========================================================================

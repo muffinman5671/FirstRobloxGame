@@ -12,6 +12,12 @@
 	  after the stale window. This is what stops two servers from duplicating a
 	  player's coins across a rapid rejoin.
 
+	  "Already its own" is looser in Studio than it looks: a Studio session
+	  invents a new jobId every time you press Play, so it also claims locks
+	  marked as Studio-written for this place. Without that, stopping and
+	  immediately restarting Play locks you out of your own save for the full
+	  stale window. See `claimsLock`.
+
 	Retry
 	  Every DataStore call goes through `attempt`, which retries with
 	  exponential backoff and jitter. A load that exhausts its retries kicks the
@@ -63,7 +69,19 @@ local BACKOFF_MAX_SECONDS = 8
 local LOCK_ACQUIRE_ATTEMPTS = 6
 local LOCK_RETRY_SECONDS = 4
 
-local JOB_ID = if game.JobId ~= "" then game.JobId else `studio_{RunService:IsRunning() and "play" or "edit"}_{os.clock()}`
+local IS_STUDIO = RunService:IsStudio()
+
+--[[
+	Identity of this server for locking purposes.
+
+	Studio never assigns a JobId, so a Studio session has to invent one. os.clock
+	alone was not enough: it restarts near zero every Play session, so two
+	sessions could mint the same id. The random suffix makes a collision -- and
+	with it a session wrongly claiming another's lock -- effectively impossible.
+]]
+local JOB_ID = if game.JobId ~= ""
+	then game.JobId
+	else `studio_{RunService:IsRunning() and "play" or "edit"}_{os.clock()}_{Random.new():NextInteger(0, 1000000000)}`
 
 -- ==========================================================================
 -- Default profile
@@ -349,22 +367,74 @@ local loading: { [Player]: boolean } = {}
 DataService.ProfileLoaded = Signal.new()
 DataService.ProfileReleased = Signal.new()
 
-local function isLockOurs(lock: SessionLock?): boolean
-	return lock ~= nil and lock.jobId == JOB_ID
+export type LockContext = {
+	jobId: string,
+	studio: boolean,
+	placeId: number,
+}
+
+--[[
+	Whether a server described by `context` may treat `lock` as its own.
+
+	The jobId match is the ordinary case. The second clause exists because a
+	Studio session's jobId is invented per Play session: a lock left behind by
+	the *previous* Play session of this same Studio looks foreign to the next
+	one, so the 15-minute stale window then locks the developer out of their own
+	save. That is precisely the situation BindToClose is supposed to prevent, and
+	precisely the one where it is least reliable -- Studio can tear a session
+	down before the final write lands.
+
+	So a Studio session also claims a lock that a Studio session wrote for this
+	same place. The direction matters and is not symmetric: a live server must
+	never claim a Studio lock, or a developer mid-test would have their session
+	silently overwritten by a player joining the published game.
+
+	Known limit: two Studio instances playing the same place as the same account
+	at the same time will each regard the other's lock as their own, and the last
+	write wins. That is a worse outcome than the old behaviour for a setup almost
+	nobody has, in exchange for fixing a lockout that everyone hits. It cannot
+	happen on a live server, where jobIds are real and `studio` is never set.
+]]
+local function claimsLock(lock: SessionLock?, context: LockContext): boolean
+	if not lock then
+		return false
+	end
+	if lock.jobId == context.jobId then
+		return true
+	end
+	return context.studio and lock.studio == true and lock.placeId == context.placeId
 end
 
-local function isLockStale(lock: SessionLock?): boolean
+local function lockAgeSeconds(lock: SessionLock?, now: number?): number
+	return (now or os.time()) - ((lock and lock.heartbeatUnix) or 0)
+end
+
+local function isLockStaleAt(lock: SessionLock?, now: number?): boolean
 	if not lock then
 		return true
 	end
-	return (os.time() - (lock.heartbeatUnix or 0)) >= LOCK_STALE_SECONDS
+	return lockAgeSeconds(lock, now) >= LOCK_STALE_SECONDS
 end
 
-local function freshLock(): SessionLock
+-- Built once: every field is fixed for the lifetime of the server.
+local LOCK_CONTEXT: LockContext = {
+	jobId = JOB_ID,
+	studio = IS_STUDIO,
+	placeId = game.PlaceId,
+}
+
+local function isLockOurs(lock: SessionLock?): boolean
+	return claimsLock(lock, LOCK_CONTEXT)
+end
+
+local function lockFor(context: LockContext): SessionLock
 	return {
-		jobId = JOB_ID,
-		placeId = game.PlaceId,
+		jobId = context.jobId,
+		placeId = context.placeId,
 		heartbeatUnix = os.time(),
+		-- Left nil on a live server so production documents keep their existing
+		-- shape; only Studio adds the field.
+		studio = if context.studio then true else nil,
 	}
 end
 
@@ -372,30 +442,59 @@ end
 -- Load / save / release
 -- ==========================================================================
 
+export type AcquireOutcome = {
+	contended: boolean,
+	reclaimed: boolean,
+}
+
+--[[
+	The transform an acquiring server hands to UpdateAsync, with the server's
+	identity passed in rather than read from this module.
+
+	Parametrised so ContentionProbe can drive it with two synthetic servers. A
+	probe that reimplemented this would only prove the reimplementation correct,
+	which is the failure mode worth avoiding: the whole point is to test the
+	decision production actually makes.
+]]
+local function acquireTransform(
+	context: LockContext,
+	outcome: AcquireOutcome
+): (StoredDocument?) -> StoredDocument?
+	return function(existing: StoredDocument?): StoredDocument?
+		local doc: StoredDocument = existing or { data = nil :: any, lock = nil }
+
+		if doc.lock and not claimsLock(doc.lock, context) and not isLockStaleAt(doc.lock, nil) then
+			-- Someone live owns this profile. Cancel the write entirely.
+			outcome.contended = true
+			return nil
+		end
+
+		-- Ours, but not by jobId: a lock this Studio's previous Play session
+		-- left behind. Worth saying out loud, because the alternative used to be
+		-- a quarter of an hour of confusion.
+		outcome.reclaimed = doc.lock ~= nil and doc.lock.jobId ~= context.jobId and claimsLock(doc.lock, context)
+
+		doc.data = migrate(doc.data)
+		doc.lock = lockFor(context)
+		return doc
+	end
+end
+
 --[[
 	Acquires the session lock and returns the migrated profile.
 	Returns nil when another live server holds the lock -- the caller retries,
 	then kicks if the contention never clears.
 ]]
 local function tryAcquire(userId: number): (boolean, Profile?, string?)
-	local contended = false
+	local outcome: AcquireOutcome = { contended = false, reclaimed = false }
 
-	local ok, document = updateAsync(keyFor(userId), `load {userId}`, function(existing)
-		local doc: StoredDocument = existing or { data = nil :: any, lock = nil }
+	local ok, document = updateAsync(keyFor(userId), `load {userId}`, acquireTransform(LOCK_CONTEXT, outcome))
 
-		if doc.lock and not isLockOurs(doc.lock) and not isLockStale(doc.lock) then
-			-- Someone live owns this profile. Cancel the write entirely.
-			contended = true
-			return nil
-		end
-
-		doc.data = migrate(doc.data)
-		doc.lock = freshLock()
-		return doc
-	end)
-
-	if contended then
+	if outcome.contended then
 		return false, nil, "locked"
+	end
+	if ok and outcome.reclaimed then
+		print(`[DataService] reclaimed a session lock left by an earlier Studio session (user {userId})`)
 	end
 	if not ok or not document then
 		return false, nil, "store_error"
@@ -473,6 +572,40 @@ local function loadProfile(player: Player)
 	DataService.ProfileLoaded:Fire(player, profile)
 end
 
+export type SaveOutcome = {
+	refused: boolean,
+}
+
+--[[
+	The transform a saving server hands to UpdateAsync. Parametrised for the same
+	reason as acquireTransform.
+
+	The refusal is reported through `outcome` rather than warned about in place,
+	because a transform can run more than once per UpdateAsync and one skipped
+	save should produce one warning.
+]]
+local function saveTransform(
+	context: LockContext,
+	payload: Profile,
+	release: boolean,
+	outcome: SaveOutcome
+): (StoredDocument?) -> StoredDocument?
+	return function(existing: StoredDocument?): StoredDocument?
+		local doc: StoredDocument = existing or { data = payload, lock = nil }
+
+		-- If our lock was stolen while we were live, don't clobber whoever owns
+		-- it now. Losing one session's progress beats corrupting the newer one.
+		if doc.lock and not claimsLock(doc.lock, context) and not isLockStaleAt(doc.lock, nil) then
+			outcome.refused = true
+			return nil
+		end
+
+		doc.data = payload
+		doc.lock = if release then nil else lockFor(context)
+		return doc
+	end
+end
+
 --[[
 	Writes the profile back. `release` clears the lock as part of the same
 	UpdateAsync so a leave never leaves a lock behind, even if the server dies
@@ -492,20 +625,13 @@ local function saveProfile(player: Player, release: boolean): boolean
 
 	local payload = deepCopy(session.profile)
 
-	local ok, document = updateAsync(keyFor(player.UserId), `save {player.UserId}`, function(existing)
-		local doc: StoredDocument = existing or { data = payload, lock = nil }
+	local outcome: SaveOutcome = { refused = false }
+	local ok, document =
+		updateAsync(keyFor(player.UserId), `save {player.UserId}`, saveTransform(LOCK_CONTEXT, payload, release, outcome))
 
-		-- If our lock was stolen while we were live, don't clobber whoever owns
-		-- it now. Losing one session's progress beats corrupting the newer one.
-		if doc.lock and not isLockOurs(doc.lock) and not isLockStale(doc.lock) then
-			warn(`[DataService] lock for {player.Name} was taken by another server; skipping save`)
-			return nil
-		end
-
-		doc.data = payload
-		doc.lock = if release then nil else freshLock()
-		return doc
-	end)
+	if outcome.refused then
+		warn(`[DataService] lock for {player.Name} was taken by another server; skipping save`)
+	end
 
 	--[[
 		A cancelled transform is NOT a successful save. UpdateAsync returns nil
@@ -776,6 +902,20 @@ DataService._internal = {
 	migrate = migrate,
 	reconcile = reconcile,
 	deepCopy = deepCopy,
+	-- Pure forms of the lock rules, taking their context as an argument rather
+	-- than reading this server's. SessionLockTest drives them with synthetic
+	-- servers, which is the only way to exercise contention from one Studio.
+	claimsLock = claimsLock,
+	isLockStaleAt = isLockStaleAt,
+	lockAgeSeconds = lockAgeSeconds,
+	lockContext = LOCK_CONTEXT,
+	-- The real UpdateAsync transforms, plus the retrying wrapper that runs them.
+	-- ContentionProbe uses these to play two servers against one live key.
+	acquireTransform = acquireTransform,
+	saveTransform = saveTransform,
+	lockFor = lockFor,
+	updateAsync = updateAsync,
+	storeKeyFor = keyFor,
 	SCHEMA_VERSION = SCHEMA_VERSION,
 	LOCK_STALE_SECONDS = LOCK_STALE_SECONDS,
 }

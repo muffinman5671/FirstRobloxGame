@@ -186,7 +186,22 @@ print(require(game.ReplicatedStorage.Shared.Tests.TestRunner).runAll())
 
 Covers weighted-roll distribution over 100k seeded rolls, the pity guarantee,
 number formatting, the generated tool curves against their config constants,
-and conversion odds. 108 assertions.
+conversion odds, and the session-lock rules. 132 assertions.
+
+Two heavier tools sit alongside the suite and are deliberately *not* part of
+`runAll()` — one makes live DataStore calls, the other runs a simulation:
+
+```lua
+print(require(game.ReplicatedStorage.Shared.Tests.ContentionProbe).run())
+print(require(game.ReplicatedStorage.Shared.Tests.BalanceModel).run({ seeds = 40 }))
+```
+
+`ContentionProbe` plays two synthetic servers against one live DataStore key
+using DataService's own `UpdateAsync` transforms. **Run it in Play mode** — its
+concurrent section hangs from the Edit-mode command bar, for reasons that are
+not the lock logic; the module header records what was ruled out.
+`BalanceModel` is the §7 milestone model; see BALANCE.md for its output and its
+assumptions.
 
 ## Verified against live infrastructure
 
@@ -202,6 +217,8 @@ fallback:
   its data untouched
 - Release on leave — after the session ends the final data is written and
   `lock` is `nil`, so a rejoin is not blocked
+- A Studio session reclaiming the lock its own previous Play session left
+  behind, and a live server correctly *refusing* to do the same
 - OrderedDataStore reachable, so the leaderboards rank real data
 
 This is worth doing rather than trusting: it caught a silent data-loss bug that
@@ -215,17 +232,26 @@ never returns `nil` from a cancelled transform.
 
 ## Known gaps
 
-- **True multi-server contention is still untested.** Everything above ran on a
-  single Studio server with a synthesised JobId. Two live servers racing for the
-  same profile — the scenario session locking exists for — cannot be reproduced
-  from Studio. The logic is exercised; the concurrency is not.
+- **True multi-server contention is still untested.** `ContentionProbe` now
+  drives DataService's own transforms with two synthetic server identities
+  against one live key, so the protocol is exercised against real DataStore
+  semantics — acquire, refuse, stale takeover, refused save, release. What it
+  cannot reproduce is two *actual* servers: same-server writers see each other's
+  writes immediately and never race across a network. The logic is tested; the
+  concurrency is not.
 - **`BindToClose` under a real shutdown.** Verified via stopping Play, which
   fires the same path, but not against an actual server shutdown with the 30
   second budget Roblox allows.
 - **No human playthrough.** The §7 balance targets are *modelled*, not played —
-  see the measured table and its caveats in BALANCE.md. The model does not grow
-  travel time with depth and plays optimally, so late-game figures are
-  optimistic.
+  see the measured table and its caveats in BALANCE.md. The model now scales
+  travel time with depth, which turned out to change the milestones by less than
+  the seed-to-seed variance; it still plays optimally, so the figures remain a
+  lower bound on how long a person takes.
+- **There is no way back up the mine.** No lift, no rope, no return-to-hub
+  control — the only teleport is the void catcher below the mine floor. From
+  Magmadeep the climb is roughly 90 seconds of jumping, every trip. It costs
+  nothing economically, because passive income accrues while you climb, so no
+  measurement in BALANCE.md flags it. It is a playtest question.
 - **Art is blockout only.** Every brainrot is a primitive silhouette marked
   `-- ART TODO` in `ModelFactory`, and there are no sounds, because every Roblox
   sound needs an asset ID and the project hardcodes none.
