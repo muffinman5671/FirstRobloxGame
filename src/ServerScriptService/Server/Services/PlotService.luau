@@ -117,8 +117,14 @@ local function buildPlot(index: number): Plot
 
 	-- Owner sign on the back wall.
 	local signPart = makePart("Sign", Vector3.new(28, 6, 1), origin * CFrame.new(0, wallH + 3, -halfD), Color3.fromRGB(38, 41, 49), model)
+	--[[
+		Back, not Front. The plot's open side is +Z and the path arrives from
+		that side, so the sign has to be readable from inside the plot looking
+		at the back wall. Front is the -Z face, which points out through the
+		back wall at the scenery.
+	]]
 	local surface = Instance.new("SurfaceGui")
-	surface.Face = Enum.NormalId.Front
+	surface.Face = Enum.NormalId.Back
 	surface.CanvasSize = Vector2.new(560, 120)
 	surface.Parent = signPart
 

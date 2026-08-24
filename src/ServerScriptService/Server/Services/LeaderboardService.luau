@@ -167,15 +167,23 @@ end
 -- Board geometry
 -- ==========================================================================
 
+--[[
+	Boards stand in a row along the west side of the plaza, turned to face east
+	across it.
+
+	The row runs along Z and the signs face +X, which is why the spacing is
+	applied to Z here and the part is rotated: a board's SurfaceGui is on its
+	Front face, and Front points down -Z until you turn it.
+]]
 local function buildBoard(spec, index: number, parent: Instance): TextLabel
-	local half = (GameConfig.ShaftRadiusBlocks + 0.5) * GameConfig.BlockSize
-	local x = (index - 1.5) * 44
-	local z = GameConfig.ShaftCenterZ - half - 34
+	local centre = GameConfig.LeaderboardCenter
+	local offset = (index - 1.5) * GameConfig.LeaderboardSpacing
 
 	local sign = Instance.new("Part")
 	sign.Name = `Board_{spec.key}`
 	sign.Size = Vector3.new(38, 26, 2)
-	sign.Position = Vector3.new(GameConfig.ShaftCenterX + x, GameConfig.SurfaceY + 14, z)
+	sign.CFrame = CFrame.new(centre.X, GameConfig.SurfaceY + GameConfig.LeaderboardHeight, centre.Z + offset)
+		* CFrame.Angles(0, -math.pi / 2, 0)
 	sign.Anchored = true
 	sign.Locked = true
 	sign.Color = Color3.fromRGB(30, 32, 38)

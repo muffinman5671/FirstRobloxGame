@@ -174,7 +174,7 @@ DESIGN.md §2.
 | D | Conversion, plots, income | Done |
 | E | UI polish, effects, leaderboards, tests | Done |
 
-11 server services, 4 client controllers, 7 UI modules.
+11 server services, 5 client controllers, 7 UI modules.
 
 ## Tests
 

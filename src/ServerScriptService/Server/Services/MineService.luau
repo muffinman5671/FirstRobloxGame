@@ -807,14 +807,62 @@ end
 -- World construction
 -- ==========================================================================
 
+-- The hub is the same substance as the mine's top row, so it takes layer 1's
+-- grass colour rather than one of its own. Change it there and both follow.
+local function grassBase(): Color3
+	local surface = LayerConfig.get(1)
+	return cartoonify((surface and surface.topColor) or Color3.fromRGB(102, 180, 62))
+end
+
+--[[
+	Fills a rectangle with floor tiles of at most HubTileSize, clamping the last
+	row and column so the rectangle's edges land exactly where they were asked
+	to. That clamping is the point: the shaft opening is defined by the mine's
+	block grid, and a tile pitch that didn't divide into it would otherwise
+	widen the hole or crowd it.
+]]
+local function tileFloor(name: string, minX: number, maxX: number, minZ: number, maxZ: number, base: Color3)
+	local pitch = GameConfig.HubTileSize
+	local thickness = GameConfig.HubThickness
+	local y = GameConfig.SurfaceY - thickness * 0.5
+
+	local sizeX, sizeZ = maxX - minX, maxZ - minZ
+	if sizeX <= 0 or sizeZ <= 0 then
+		return
+	end
+
+	for ix = 0, math.ceil(sizeX / pitch) - 1 do
+		local x0 = minX + ix * pitch
+		local x1 = math.min(x0 + pitch, maxX)
+
+		for iz = 0, math.ceil(sizeZ / pitch) - 1 do
+			local z0 = minZ + iz * pitch
+			local z1 = math.min(z0 + pitch, maxZ)
+
+			local tile = Instance.new("Part")
+			tile.Name = name
+			tile.Anchored = true
+			tile.Locked = true
+			tile.Size = Vector3.new(x1 - x0, thickness, z1 - z0)
+			tile.Position = Vector3.new((x0 + x1) * 0.5, y, (z0 + z1) * 0.5)
+			-- Same hash the mine blocks use, on tile indices, so the lawn is
+			-- quantized noise rather than a checkerboard or a gradient.
+			tile.Color = quantize(base, shadeOf(math.floor(x0 / pitch), 0, math.floor(z0 / pitch)))
+			tile.Material = Enum.Material.LeafyGrass
+			tile.TopSurface = Enum.SurfaceType.Smooth
+			tile.BottomSurface = Enum.SurfaceType.Smooth
+			tile.Parent = hubFolder
+		end
+	end
+end
+
 local function buildHub()
 	local half = (RADIUS + 0.5) * BLOCK
 	local cx, cz = GameConfig.ShaftCenterX, GameConfig.ShaftCenterZ
 	local extent = GameConfig.HubExtent
-	local thickness = GameConfig.HubThickness
-	local y = GameConfig.SurfaceY - thickness * 0.5
+	local base = grassBase()
 
-	-- Four slabs forming a ring, leaving a square opening over the shaft.
+	-- Four rectangles forming a ring, leaving a square opening over the shaft.
 	local slabs = {
 		{ minX = -extent, maxX = extent, minZ = -extent, maxZ = cz - half },
 		{ minX = -extent, maxX = extent, minZ = cz + half, maxZ = extent },
@@ -823,25 +871,14 @@ local function buildHub()
 	}
 
 	for index, slab in slabs do
-		local sizeX = slab.maxX - slab.minX
-		local sizeZ = slab.maxZ - slab.minZ
-		if sizeX > 0 and sizeZ > 0 then
-			local part = Instance.new("Part")
-			part.Name = `HubSlab{index}`
-			part.Anchored = true
-			part.Locked = true
-			part.Size = Vector3.new(sizeX, thickness, sizeZ)
-			part.Position = Vector3.new((slab.minX + slab.maxX) * 0.5, y, (slab.minZ + slab.maxZ) * 0.5)
-			part.Color = Color3.fromRGB(112, 108, 100)
-			part.Material = Enum.Material.Ground
-			part.TopSurface = Enum.SurfaceType.Smooth
-			part.Parent = hubFolder
-		end
+		tileFloor(`HubTile{index}`, slab.minX, slab.maxX, slab.minZ, slab.maxZ, base)
 	end
 
 	-- Spawn right at the lip of the shaft. Anywhere further and a new player has
-	-- to work out that the grass square in the middle of a grey floor is the
-	-- thing they're meant to walk to.
+	-- to work out which part of the field they're meant to walk to.
+	--
+	-- Pale stone, because the floor is grass now: a green pad on a green lawn is
+	-- not a landmark.
 	local spawn = Instance.new("SpawnLocation")
 	hubSpawnPosition = Vector3.new(cx, GameConfig.SurfaceY + 4, cz - half - 6)
 	spawn.Name = "HubSpawn"
@@ -849,10 +886,165 @@ local function buildHub()
 	spawn.Locked = true
 	spawn.Size = Vector3.new(12, 1, 12)
 	spawn.Position = Vector3.new(cx, GameConfig.SurfaceY + 0.5, cz - half - 6)
-	spawn.Color = Color3.fromRGB(86, 196, 118)
-	spawn.Material = Enum.Material.SmoothPlastic
+	spawn.Color = Color3.fromRGB(228, 216, 182)
+	spawn.Material = Enum.Material.Sandstone
 	spawn.Duration = 0
 	spawn.Parent = hubFolder
+end
+
+--[[
+	A point on the hub's perimeter, `distance` studs clockwise from the
+	north-west corner, plus the inward normal at that point. The ring is square
+	because the hub is -- a circular ridge would leave the corners open, which
+	are exactly the sightlines that show the most void.
+]]
+local function perimeterPoint(ring: number, distance: number): (number, number, Vector3)
+	local side = ring * 2
+	local t = distance % (side * 4)
+
+	if t < side then
+		return -ring + t, -ring, Vector3.new(0, 0, 1)
+	elseif t < side * 2 then
+		return ring, -ring + (t - side), Vector3.new(-1, 0, 0)
+	elseif t < side * 3 then
+		return ring - (t - side * 2), ring, Vector3.new(0, 0, -1)
+	end
+	return -ring, ring - (t - side * 3), Vector3.new(1, 0, 0)
+end
+
+--[[
+	The ridge. Each mound is a stack of boxes, each one stepped in from the one
+	below and the whole stack turned a random amount about Y, so no two read the
+	same from the plaza.
+
+	The bottom terrace starts below the surface rather than on it -- a terrace
+	sitting exactly at ground level shows a seam against the lawn from every
+	angle, and sinking it costs nothing.
+]]
+local hillCount = 0
+
+local function buildHills()
+	local rng = Random.new(GameConfig.HillSeed)
+	local base = grassBase()
+	local ring = GameConfig.HubExtent - GameConfig.HillInset
+	local perimeter = ring * 8
+	local sites = math.max(4, math.floor(perimeter / GameConfig.HillSpacing))
+	local spacing = perimeter / sites
+	local built = 0
+
+	for site = 0, sites - 1 do
+		for _ = 1, GameConfig.HillMoundsPerSite do
+			-- Jitter along the ridge by up to half a step, so clusters merge.
+			local along = site * spacing + rng:NextNumber(-spacing * 0.5, spacing * 0.5)
+			local x, z, inward = perimeterPoint(ring, along)
+
+			local visible = rng:NextNumber(GameConfig.HillVisibleMin, GameConfig.HillVisibleMax)
+			local width = rng:NextNumber(GameConfig.HillWidthMin, GameConfig.HillWidthMax)
+			local steps = rng:NextInteger(GameConfig.HillStepsMin, GameConfig.HillStepsMax)
+			-- Biased outward: the inward figure is the one the hub's clearance
+			-- arithmetic depends on, so it is the one kept small.
+			local drift = rng:NextNumber(-GameConfig.HillInset * 0.6, GameConfig.HillInset * 0.4)
+			local turn = math.rad(rng:NextNumber(-GameConfig.HillTurnDegrees, GameConfig.HillTurnDegrees))
+
+			local footing = Vector3.new(x, 0, z) + inward * drift
+			local sink = 6
+			local stepHeight = (visible + sink) / steps
+
+			for index = 1, steps do
+				local terraceWidth = width * GameConfig.HillStepInset ^ (index - 1)
+
+				-- Each terrace wanders slightly off the stack's centre line, so
+				-- the profile is a hill rather than a wedding cake.
+				local wobble = terraceWidth * 0.06
+				local offset = Vector3.new(rng:NextNumber(-wobble, wobble), 0, rng:NextNumber(-wobble, wobble))
+				local centreY = GameConfig.SurfaceY - sink + stepHeight * (index - 0.5)
+
+				local terrace = Instance.new("Part")
+				terrace.Name = "Hill"
+				terrace.Anchored = true
+				terrace.Locked = true
+				terrace.Size = Vector3.new(terraceWidth, stepHeight, terraceWidth)
+				terrace.CFrame = CFrame.new(footing + offset + Vector3.new(0, centreY, 0))
+					* CFrame.Angles(0, turn, 0)
+				terrace.Color = quantize(base, rng:NextInteger(0, GameConfig.PaletteShades - 1))
+				terrace.Material = Enum.Material.LeafyGrass
+				terrace.TopSurface = Enum.SurfaceType.Smooth
+				terrace.BottomSurface = Enum.SurfaceType.Smooth
+				terrace.Parent = hubFolder
+				built += 1
+			end
+		end
+	end
+
+	hillCount = built
+	return built
+end
+
+--[[
+	The path: a spine from the plot row north to the spawn pad, and a cross bar
+	along the front of the plots feeding into it.
+
+	Raised PathRaise above the lawn rather than laid flush. Two coplanar faces
+	z-fight, and the alternative -- cutting the grass tiles around the path --
+	would make the lawn's tiling depend on where the path happens to run.
+]]
+local function buildPath()
+	local pitch = GameConfig.PathTileSize
+	local halfWidth = GameConfig.PathWidth * 0.5
+	-- Muted on purpose: cartoonify multiplies saturation by 1.45, and a base
+	-- picked to look like dirt on its own comes out of that as bright orange
+	-- against the grass.
+	local dirt = cartoonify(Color3.fromRGB(146, 124, 98))
+	local built = 0
+
+	local function strip(name: string, minX: number, maxX: number, minZ: number, maxZ: number)
+		for ix = 0, math.ceil((maxX - minX) / pitch) - 1 do
+			local x0 = minX + ix * pitch
+			local x1 = math.min(x0 + pitch, maxX)
+
+			for iz = 0, math.ceil((maxZ - minZ) / pitch) - 1 do
+				local z0 = minZ + iz * pitch
+				local z1 = math.min(z0 + pitch, maxZ)
+
+				local tile = Instance.new("Part")
+				tile.Name = name
+				tile.Anchored = true
+				tile.Locked = true
+				tile.Size = Vector3.new(x1 - x0, 1, z1 - z0)
+				tile.Position =
+					Vector3.new((x0 + x1) * 0.5, GameConfig.SurfaceY + GameConfig.PathRaise - 0.5, (z0 + z1) * 0.5)
+				tile.Color = quantize(dirt, shadeOf(math.floor(x0 / pitch), 1, math.floor(z0 / pitch)))
+				tile.Material = Enum.Material.Sand
+				tile.TopSurface = Enum.SurfaceType.Smooth
+				tile.BottomSurface = Enum.SurfaceType.Smooth
+				tile.Parent = hubFolder
+				built += 1
+			end
+		end
+	end
+
+	local shaftHalf = (RADIUS + 0.5) * BLOCK
+	local plotSpacing = GameConfig.PlotWidth + GameConfig.PlotSpacing
+	local firstPlotX = GameConfig.PlotOrigin.X
+	local lastPlotX = firstPlotX + (GameConfig.PlotCount - 1) * plotSpacing
+
+	-- Front edge of the plot row, and the near lip of the shaft.
+	local plotFrontZ = GameConfig.PlotOrigin.Z + GameConfig.PlotDepth * 0.5
+	local shaftFrontZ = GameConfig.ShaftCenterZ - shaftHalf
+
+	-- Cross bar, wide enough to meet the outermost plots square on.
+	strip("PathCross", firstPlotX - halfWidth, lastPlotX + halfWidth, plotFrontZ, plotFrontZ + GameConfig.PathWidth)
+
+	-- Spine, from the cross bar to the shaft lip.
+	strip(
+		"PathSpine",
+		GameConfig.ShaftCenterX - halfWidth,
+		GameConfig.ShaftCenterX + halfWidth,
+		plotFrontZ + GameConfig.PathWidth,
+		shaftFrontZ
+	)
+
+	return built
 end
 
 --[[
@@ -918,6 +1110,7 @@ function MineService.stats()
 		pooledParts = #pool,
 		activeTiles = tileCount,
 		pooledTiles = #patchPool,
+		hills = hillCount,
 		maxGy = MAX_GY,
 	}
 end
@@ -975,6 +1168,8 @@ function MineService.Start()
 	end
 
 	buildHub()
+	buildPath()
+	buildHills()
 	hubFolder.Parent = Workspace
 	mineFolder.Parent = Workspace
 	claimSpawns()

@@ -38,8 +38,42 @@ GameConfig.ShaftCenterZ = 80
 
 -- Hub platform built by MineService. Its top surface is SurfaceY, with a square
 -- opening cut out over the shaft.
-GameConfig.HubExtent = 256 -- half-width, studs
+--[[
+	Half-width, studs. Sized against the ridge rather than picked: hills stand
+	on a ring HillInset inside this edge and grow inward by roughly half their
+	width, so the platform has to be wide enough that the ridge closes behind
+	the plot row instead of through it. See the clearance arithmetic above
+	GameConfig.HillInset.
+]]
+GameConfig.HubExtent = 360
 GameConfig.HubThickness = 20
+
+--[[
+	The hub floor is laid as square tiles rather than four big slabs, each tile
+	taking its own step of the grass ramp. Same trick the mine blocks use, at a
+	coarser pitch: a single flat slab reads as a single flat slab no matter what
+	material is on it, and this is the cheapest way to get a lawn that looks
+	drawn rather than extruded (DESIGN.md §2a -- detail from geometry, not from
+	texture, because a texture needs an asset ID and this project ships none).
+
+	Tiles are clamped at the shaft opening, so the pitch never determines the
+	shape of the hole. 40 gives ~320 parts across the whole hub.
+]]
+GameConfig.HubTileSize = 40
+
+--[[
+	The path from the plots to the shaft.
+
+	A spine running north from the plot row to the spawn pad, and a cross bar in
+	front of the plots feeding into it. Without it the hub is an undifferentiated
+	green field and nothing tells a new player which way the mine is.
+
+	Laid as tiles like the lawn, in the same dirt colour as Topsoil, and raised a
+	hair above the grass so the two never z-fight where they overlap.
+]]
+GameConfig.PathTileSize = 16
+GameConfig.PathWidth = 16
+GameConfig.PathRaise = 0.05
 
 -- Blocks materialized per streaming tick. Caps the cost of a single pass so a
 -- player teleporting to a fresh depth spreads the work over a few frames
@@ -59,6 +93,57 @@ GameConfig.MaxBlocksPerStreamTick = 220
 	ChunkStreamTickSeconds (walkspeed 16 -> 8 studs, plus fall speed).
 ]]
 GameConfig.SafeLoadRadius = 40
+
+--[[
+	Hills.
+
+	A ridge set just inside the hub edge, so that standing anywhere on the hub
+	you see green hills rather than the platform's rim and the void past it.
+
+	Built as stacked boxes, not domes. Spheres were the obvious way to get a
+	hill and the wrong one: this game's whole look is flat matte mass with hard
+	edges, and a row of smooth balls reads as a different game's art. Terracing
+	them is also the same answer the mine already gives to sub-block detail --
+	more blocks, not smoother ones.
+
+	Sizing rule: a mound rising H studs at distance D covers everything below
+	atan(H/D) from the eye. At the 334-stud ring a 46-stud mound clears 8
+	degrees, well above the horizon line from anywhere on the hub. Lower these
+	and the void starts showing over the top.
+
+	Clearance rule, which is what actually sizes the hub. A mound sits on the
+	ring, drifts inward by at most HillInset * 0.4, and its bottom terrace
+	reaches inward by half its width -- times up to 1.37 once turned, since a
+	rotated square is wider than its side. So the ridge's inner face lands at
+
+	    HubExtent - HillInset - HillInset*0.4 - (HillWidthMax/2 * 1.37)
+
+	which at these values is 243, against a plot row reaching 216. Widen the
+	plot row or the hills and that margin is the thing to recheck: get it wrong
+	and hills grow through the outer plots.
+]]
+GameConfig.HillInset = 26 -- from the hub edge to the ridge centre line
+GameConfig.HillSpacing = 56 -- along the perimeter, between mound clusters
+GameConfig.HillMoundsPerSite = 2 -- overlapping mounds per cluster, for a lumpy silhouette
+GameConfig.HillVisibleMin = 46 -- studs standing above the ground
+GameConfig.HillVisibleMax = 88
+GameConfig.HillWidthMin = 74 -- footprint of the bottom terrace
+GameConfig.HillWidthMax = 118
+
+-- Terraces per mound, and how much each one steps in from the terrace below.
+-- Fewer, deeper steps read as a ziggurat; more, shallower ones start looking
+-- like a cone again. 3-5 is the range that still reads as built from blocks.
+GameConfig.HillStepsMin = 3
+GameConfig.HillStepsMax = 5
+GameConfig.HillStepInset = 0.68
+
+-- Each mound is turned a random amount, so the ridge is not 80 copies of one
+-- silhouette lined up in a row.
+GameConfig.HillTurnDegrees = 30
+
+-- Fixed, because the world is shared: every server must build the same hills,
+-- and an unseeded Random would give each one its own landscape.
+GameConfig.HillSeed = 20250817
 
 -- A player below the mine floor by this much has fallen out of the world and
 -- gets returned to the hub. Generous enough that legitimately standing on the
@@ -232,6 +317,48 @@ GameConfig.OreYieldMin = 1
 GameConfig.OreYieldMax = 2
 
 -- ==========================================================================
+-- Atmosphere
+-- ==========================================================================
+--[[
+	Every LayerDef has carried fogColor, fogEnd and ambientColor since the
+	layers were written, and until now nothing read any of them: the per-layer
+	atmosphere was specced and never wired up, which is why all six layers lit
+	identically and why you could see straight off the edge of the world.
+	AtmosphereController applies them from the client, off the local player's
+	depth.
+
+	These are the above-ground values, which no LayerDef can supply -- layer 1
+	starts at the surface and runs 70 studs down, and the fog that suits a shaft
+	is not the fog that suits an open field.
+]]
+
+--[[
+	Deliberately far. The first attempt at this was 620, which put 36% haze on
+	the ridge and 67% on its corners -- at any normal camera distance the hills
+	simply dissolved into grey, which is a strange way to treat the one piece of
+	scenery whose entire job is being seen.
+
+	Above ground the hills are what hides the void, so fog up here is only for
+	depth. At 1800 the fog does not begin until 504 studs (FogStartFraction),
+	which is past the ridge's far corners at ~472: the hub reads clean, and the
+	haze only starts on whatever lies beyond the hills.
+]]
+GameConfig.SurfaceFogEnd = 1800
+GameConfig.SurfaceFogColor = Color3.fromRGB(198, 214, 232)
+GameConfig.SurfaceAmbient = Color3.fromRGB(126, 134, 148)
+
+-- Fog begins this fraction of the way to FogEnd. Low values read as haze the
+-- moment you look up; too high and the fall-off becomes a visible wall.
+GameConfig.FogStartFraction = 0.28
+
+--[[
+	Seconds for the atmosphere to cross most of the way to a new layer's values.
+	Crossing a band boundary should feel like descending, not like a cut -- but
+	long blends mean the surface fog is still lifting when you are 40 studs down.
+]]
+GameConfig.FogBlendSeconds = 0.8
+
+-- ==========================================================================
 -- Tick rates
 -- ==========================================================================
 
@@ -362,11 +489,43 @@ GameConfig.MaxPlotSlots = 24
 	costs a table write instead of building geometry while someone is waiting.
 ]]
 
-GameConfig.PlotCount = 20 -- matches the doc's 20-player target
-GameConfig.PlotOrigin = Vector3.new(-600, 0, -200)
+--[[
+	Four plots, laid out in a row just north of the shaft.
+
+	This is fewer than the doc's 20-player target on purpose, and the trade is
+	real: PlotService hands out plots first-come, so player five onwards gets a
+	warning and no plot, which means no podiums and no passive income for them.
+	Raise this (and widen the row, or it will run off the hub) if the place is
+	ever opened past four players.
+
+	The row sits inside the hub slab rather than 600 studs away across empty
+	space, so the walk from the shaft to your podiums is a few seconds.
+]]
+GameConfig.PlotCount = 4
+GameConfig.PlotOrigin = Vector3.new(-168, 0, -120)
+
+--[[
+	Leaderboards, off to the west of the plaza and turned to face it.
+
+	They used to stand on the walk between the plots and the shaft, facing back
+	down it -- which put two 38x26 slabs directly across the one sightline that
+	should always be clear, the one that tells you where the mine is. Standing
+	them to the side keeps them readable on the way past without their being the
+	thing you have to walk around.
+]]
+GameConfig.LeaderboardCenter = Vector3.new(-132, 0, 24)
+GameConfig.LeaderboardSpacing = 44
+GameConfig.LeaderboardHeight = 14
+--[[
+	Width is set by the podium grid: PodiumsPerRow (6) at PodiumSpacing (14) is
+	70 studs plus a podium, so anything under ~86 pushes podiums through the
+	side walls. Depth only needs the 4 rows that hold MaxPlotSlots, which is 50,
+	so it was trimmed from 96 -- a row of four 96-deep plots made the hub wider
+	than the ridge could close around.
+]]
 GameConfig.PlotWidth = 96
-GameConfig.PlotDepth = 96
-GameConfig.PlotSpacing = 24 -- gap between neighbouring plots
+GameConfig.PlotDepth = 64
+GameConfig.PlotSpacing = 16 -- gap between neighbouring plots
 GameConfig.PlotWallHeight = 12
 GameConfig.PlotWallThickness = 2
 GameConfig.PlotFloorThickness = 4

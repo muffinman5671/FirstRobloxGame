@@ -24,6 +24,7 @@ local CONTROLLER_ORDER: { string } = {
 	"UIController",
 	"NotifyController",
 	"EffectsController",
+	"AtmosphereController",
 }
 
 -- Blocks until the server's remote folder has replicated, so no controller has
