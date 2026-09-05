@@ -98,7 +98,7 @@ function ContentionProbe.run(): string
 	local updateAsync = internal.updateAsync
 	local acquireTransform = internal.acquireTransform
 	local saveTransform = internal.saveTransform
-	local lockFor = internal.lockFor
+	local _lockFor = internal.lockFor
 	local defaultProfile = internal.defaultProfile
 	local STALE = internal.LOCK_STALE_SECONDS
 

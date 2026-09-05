@@ -6,3 +6,9 @@
 /*.rbxl.lock
 
 sourcemap.json
+
+# Generated tooling artifacts. Regenerate with `.tooling/refresh.sh` -- they are
+# 8MB of API dump between them and go stale with every Roblox release.
+/roblox.yml
+/.tooling/globalTypes.d.luau
+/.tooling/api-docs.json
