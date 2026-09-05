@@ -538,4 +538,41 @@ function PlotService.stats()
 	return { built = #plots, claimed = claimed }
 end
 
+--[[
+	Builds the empty plot shells into `parent`, for MineService's Edit-mode hub
+	preview. Geometry only: podium occupants come from player profiles, which do
+	not exist outside a running game.
+
+	buildPlot parents into the plotFolder upvalue, so point that at the caller's
+	folder for the duration rather than duplicating it -- a copy would be a
+	second definition of a plot, and the two would drift.
+
+	Deliberately does not touch `plots`. That list is the live registry Start()
+	builds and claim/release mutate; a preview writing into it would leave the
+	service believing it already had four plots.
+]]
+function PlotService.appendPreview(parent: Instance): number
+	local folder = Instance.new("Folder")
+	folder.Name = "Plots"
+
+	local previous = plotFolder
+	plotFolder = folder
+
+	local ok, err = pcall(function()
+		for index = 1, GameConfig.PlotCount do
+			buildPlot(index)
+		end
+	end)
+
+	plotFolder = previous
+
+	if not ok then
+		folder:Destroy()
+		error(`[PlotService] preview build failed: {err}`, 0)
+	end
+
+	folder.Parent = parent
+	return #folder:GetChildren()
+end
+
 return PlotService

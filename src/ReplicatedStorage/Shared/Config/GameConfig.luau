@@ -36,30 +36,75 @@ GameConfig.SurfaceY = 0
 GameConfig.ShaftCenterX = 0
 GameConfig.ShaftCenterZ = 80
 
--- Hub platform built by MineService. Its top surface is SurfaceY, with a square
--- opening cut out over the shaft.
 --[[
-	Half-width, studs. Sized against the ridge rather than picked: hills stand
-	on a ring HillInset inside this edge and grow inward by roughly half their
-	width, so the platform has to be wide enough that the ridge closes behind
-	the plot row instead of through it. See the clearance arithmetic above
-	GameConfig.HillInset.
+	Hub platform built by MineService, top surface at SurfaceY.
+
+	Two rectangles, not one square. The square was 720 across and the things
+	standing on it are not: the plot row spans X +-216 and the shaft is a 52-stud
+	hole, so a single extent wide enough for the plots left ~250 studs of empty
+	lawn behind them and a shaft sitting in the middle of a field.
+
+	So: a wide band holding the plot row, and a narrow stem running north to the
+	shaft. The stem's width is set by what has to fit beside the shaft -- the
+	leaderboard row on its west wall, and room to walk past on either side --
+	not by the plot row, which is nearly three times wider.
+
+	Both bands are measured to the *outer* rim. The wall stands inside that,
+	reaching WallThickness inward, so the walkable figures are each of these
+	less 16.
 ]]
-GameConfig.HubExtent = 360
+GameConfig.HubPlotHalfX = 252 -- plot row reaches +-216; 20 studs of lawn, then wall
+GameConfig.HubPlotZMin = -188 -- plot backs are at -152, same 20-stud margin
+GameConfig.HubPlotZMax = -20 -- where the plot band ends and the stem takes over
+GameConfig.HubMineHalfX = 96 -- stem half-width; shaft is only +-26
+GameConfig.HubMineZMax = 162 -- stem's north rim; shaft's far lip is 106
+
 GameConfig.HubThickness = 20
 
 --[[
 	The hub floor is laid as square tiles rather than four big slabs, each tile
-	taking its own step of the grass ramp. Same trick the mine blocks use, at a
-	coarser pitch: a single flat slab reads as a single flat slab no matter what
-	material is on it, and this is the cheapest way to get a lawn that looks
-	drawn rather than extruded (DESIGN.md §2a -- detail from geometry, not from
-	texture, because a texture needs an asset ID and this project ships none).
+	taking its own step of the grass ramp. Same trick the mine blocks use: a
+	single flat slab reads as a single flat slab no matter what material is on
+	it, and this is the cheapest way to get a lawn that looks drawn rather than
+	extruded (DESIGN.md 2a -- detail from geometry, not from texture, because a
+	texture needs an asset ID and this project ships none).
 
-	Tiles are clamped at the shaft opening, so the pitch never determines the
-	shape of the hole. 40 gives ~320 parts across the whole hub.
+	Dropped 40 -> 16 once the hub shrank. At 40 the lawn was ~73 tiles over the
+	tightened footprint and read as a handful of flat quadrants; 16 gives ~460,
+	which is back around what the old 720-square cost at its coarser pitch.
+
+	Every rectangle's edges must land exactly where they were asked -- the shaft
+	opening is defined by the mine's block grid -- so the span is divided into
+	equal columns rather than stepped at a fixed pitch and clamped. Clamping
+	lands the edges too, but leaves a sliver tile along two edges of every
+	rectangle, which is exactly the defect the wall had.
 ]]
-GameConfig.HubTileSize = 40
+GameConfig.HubTileSize = 16
+
+--[[
+	Lawn relief. Each tile's top is dropped by 0, half, or all of this.
+
+	Downward, not upward: the path sits only PathRaise above the surface, and a
+	lawn tile lifted higher than that would poke through it. Sinking instead
+	keeps SurfaceY the ceiling, so anything laid on the lawn stays on top of it.
+]]
+GameConfig.HubRelief = 0.35
+
+--[[
+	Ground scatter -- grass clumps and the odd stone sitting on the lawn.
+
+	Placed per floor tile rather than free-scattered, so density follows the
+	lawn and nothing needs a spatial index. Non-colliding, so a player never
+	catches on one. Seeded, because the world is shared and every server has to
+	grow the same lawn.
+]]
+GameConfig.HubScatterSeed = 20260905
+GameConfig.HubScatterChance = 0.3 -- of lawn tiles that get a clump
+GameConfig.HubScatterStoneChance = 0.18 -- of those clumps, how many are stone
+GameConfig.HubScatterSizeMin = 2.5
+GameConfig.HubScatterSizeMax = 5.5
+GameConfig.HubScatterHeightMin = 0.9
+GameConfig.HubScatterHeightMax = 2.4
 
 --[[
 	The path from the plots to the shaft.
@@ -70,10 +115,19 @@ GameConfig.HubTileSize = 40
 
 	Laid as tiles like the lawn, in the same dirt colour as Topsoil, and raised a
 	hair above the grass so the two never z-fight where they overlap.
+
+	Width 16 with a 16-stud tile made the spine literally one paver wide and the
+	cross bar one paver deep, which is why it read as a row of big squares. 28
+	wide on an 8-stud paver is four across -- a path rather than a line of tiles.
 ]]
-GameConfig.PathTileSize = 16
-GameConfig.PathWidth = 16
+GameConfig.PathTileSize = 8
+GameConfig.PathWidth = 28
 GameConfig.PathRaise = 0.05
+
+-- Paver relief, upward: the path is already above the lawn, so lifting is safe
+-- here where it is not on the grass. Smaller than the lawn's, because an uneven
+-- path reads as broken rather than natural.
+GameConfig.PathRelief = 0.12
 
 -- Blocks materialized per streaming tick. Caps the cost of a single pass so a
 -- player teleporting to a fresh depth spreads the work over a few frames
@@ -95,55 +149,81 @@ GameConfig.MaxBlocksPerStreamTick = 220
 GameConfig.SafeLoadRadius = 40
 
 --[[
-	Hills.
+	The retaining wall.
 
-	A ridge set just inside the hub edge, so that standing anywhere on the hub
-	you see green hills rather than the platform's rim and the void past it.
+	A square parapet standing on the hub's rim: a checkerboard of two dirt
+	shades, capped with a grass lip. Standing anywhere on the hub you see a
+	built earth wall and a green top edge rather than the platform's rim and the
+	void past it.
 
-	Built as stacked boxes, not domes. Spheres were the obvious way to get a
-	hill and the wrong one: this game's whole look is flat matte mass with hard
-	edges, and a row of smooth balls reads as a different game's art. Terracing
-	them is also the same answer the mine already gives to sub-block detail --
-	more blocks, not smoother ones.
+	This replaced a ridge of terraced grass mounds. The mounds sat on a ring
+	inset from the edge and grew *inward* by half their width, which is what
+	forced the hub's old clearance arithmetic -- widen either the plot row or a
+	mound and hills would grow through the outer plots. A wall occupies a fixed
+	WallThickness on the rim and reaches inward by nothing, so that whole class
+	of bug is gone with it.
 
-	Sizing rule: a mound rising H studs at distance D covers everything below
-	atan(H/D) from the eye. At the 334-stud ring a 46-stud mound clears 8
-	degrees, well above the horizon line from anywhere on the hub. Lower these
-	and the void starts showing over the top.
+	The pattern is a true checkerboard, which is a deliberate break from the
+	lawn's quantized noise. The lawn wants to read as ground, where a regular
+	grid would look like a tiled floor instead; the wall is a built structure,
+	and a built structure is exactly where a regular grid belongs.
 
-	Clearance rule, which is what actually sizes the hub. A mound sits on the
-	ring, drifts inward by at most HillInset * 0.4, and its bottom terrace
-	reaches inward by half its width -- times up to 1.37 once turned, since a
-	rotated square is wider than its side. So the ridge's inner face lands at
-
-	    HubExtent - HillInset - HillInset*0.4 - (HillWidthMax/2 * 1.37)
-
-	which at these values is 243, against a plot row reaching 216. Widen the
-	plot row or the hills and that margin is the thing to recheck: get it wrong
-	and hills grow through the outer plots.
+	Sizing: tiles are square at WallTileSize, and WallHeight is kept a whole
+	multiple of it so the top row is never a sliver. 24 into 96 gives 4 rows,
+	and about 290 parts around the two bands' 1730-stud outline -- down from 480
+	when the hub was a 2880-stud square, and comfortably under the lawn's ~320.
 ]]
-GameConfig.HillInset = 26 -- from the hub edge to the ridge centre line
-GameConfig.HillSpacing = 56 -- along the perimeter, between mound clusters
-GameConfig.HillMoundsPerSite = 2 -- overlapping mounds per cluster, for a lumpy silhouette
-GameConfig.HillVisibleMin = 46 -- studs standing above the ground
-GameConfig.HillVisibleMax = 88
-GameConfig.HillWidthMin = 74 -- footprint of the bottom terrace
-GameConfig.HillWidthMax = 118
+GameConfig.WallHeight = 96 -- face height, plinth included, before the coping goes on
+GameConfig.WallThickness = 16 -- inward from the hub rim
 
--- Terraces per mound, and how much each one steps in from the terrace below.
--- Fewer, deeper steps read as a ziggurat; more, shallower ones start looking
--- like a cone again. 3-5 is the range that still reads as built from blocks.
-GameConfig.HillStepsMin = 3
-GameConfig.HillStepsMax = 5
-GameConfig.HillStepInset = 0.68
+--[[
+	Face detailing.
 
--- Each mound is turned a random amount, so the ridge is not 80 copies of one
--- silhouette lined up in a row.
-GameConfig.HillTurnDegrees = 30
+	A 96-stud slab in one flat plane of 24-stud squares read as a box no matter
+	what colour was on it. The fix is the one DESIGN.md already prescribes for
+	sub-block detail -- more geometry, not smoother geometry -- so the face is
+	now a proper wall section: a plinth at the bottom, a finer checker above it,
+	a string course under an overhanging coping, and pilasters at intervals to
+	break the long runs.
 
--- Fixed, because the world is shared: every server must build the same hills,
--- and an unseeded Random would give each one its own landscape.
-GameConfig.HillSeed = 20250817
+	Tiles dropped 24 -> 16, which also puts the checker density closer to the
+	reference art (5 rows of face instead of 3). (WallHeight - WallPlinthHeight)
+	must stay a whole multiple of WallTileSize or the top row comes out a sliver.
+]]
+GameConfig.WallTileSize = 16 -- square checker tile; (96 - 16) / 16 = 5 rows
+GameConfig.WallPlinthHeight = 16 -- base course, one tile row tall
+GameConfig.WallStringHeight = 4 -- thin band between the face and the coping
+GameConfig.WallCapHeight = 7 -- the grass coping itself
+GameConfig.WallCapOverhang = 3 -- coping oversails both faces, for a shadow line
+GameConfig.WallProud = 2 -- how far the plinth and string course stand out
+
+--[[
+	Per-tile relief. Each tile is pushed out from the rim by 0, half, or all of
+	this, picked by the same hash the mine blocks use for shade. Small on
+	purpose: enough that the face catches light unevenly and stops reading as a
+	single plane, not so much that it looks damaged.
+]]
+GameConfig.WallRelief = 0.6
+
+-- Buttresses along each run, and on its first and last column -- so every
+-- corner gets one, and the 504-stud south run is not one unbroken sweep.
+-- A pilaster occupies a whole column of the face grid rather than a fixed
+-- width: off the grid it cut tiles in half and left slivers down its sides.
+GameConfig.WallPilasterSpacing = 64
+GameConfig.WallPilasterProud = 3
+
+-- The two checker steps, as indices into the shade palette. Far apart on
+-- purpose: adjacent steps are a 7% difference and read as one flat colour at
+-- any distance.
+GameConfig.WallCheckerShades = { 0, 3 }
+
+-- Pushed warm and saturated on purpose, which looks wrong written down:
+-- cartoonify multiplies saturation by 1.45, leaving the base at 168,93,25.
+-- But every face of the wall points inward, away from the sun, and
+-- SurfaceAmbient is a blue-grey -- which drains a gentler brown to mauve. The
+-- flat material carries no texture to hide that either. Tuned against a lit
+-- screenshot rather than on paper; re-tune it the same way.
+GameConfig.WallColor = Color3.fromRGB(150, 104, 62)
 
 -- A player below the mine floor by this much has fallen out of the world and
 -- gets returned to the hub. Generous enough that legitimately standing on the
@@ -334,14 +414,16 @@ GameConfig.OreYieldMax = 2
 
 --[[
 	Deliberately far. The first attempt at this was 620, which put 36% haze on
-	the ridge and 67% on its corners -- at any normal camera distance the hills
-	simply dissolved into grey, which is a strange way to treat the one piece of
-	scenery whose entire job is being seen.
+	the ridge and 67% on its corners -- at any normal camera distance the
+	scenery simply dissolved into grey, which is a strange way to treat the one
+	piece of it whose entire job is being seen.
 
-	Above ground the hills are what hides the void, so fog up here is only for
-	depth. At 1800 the fog does not begin until 504 studs (FogStartFraction),
-	which is past the ridge's far corners at ~472: the hub reads clean, and the
-	haze only starts on whatever lies beyond the hills.
+	Above ground the retaining wall is what hides the void, so fog up here is
+	only for depth. At 1800 the fog does not begin until 504 studs
+	(FogStartFraction), and since the hub was tightened the farthest corner of
+	the wall is the plot band's, at 313 studs. Nothing built now reaches the
+	ramp at all: the hub reads clean, and the fog only bites on whatever lies
+	beyond the wall.
 ]]
 GameConfig.SurfaceFogEnd = 1800
 GameConfig.SurfaceFogColor = Color3.fromRGB(198, 214, 232)
@@ -505,15 +587,20 @@ GameConfig.PlotCount = 4
 GameConfig.PlotOrigin = Vector3.new(-168, 0, -120)
 
 --[[
-	Leaderboards, off to the west of the plaza and turned to face it.
+	Leaderboards: a row along Z on the west side of the stem, turned to face
+	east across it.
 
 	They used to stand on the walk between the plots and the shaft, facing back
 	down it -- which put two 38x26 slabs directly across the one sightline that
 	should always be clear, the one that tells you where the mine is. Standing
-	them to the side keeps them readable on the way past without their being the
+	them side-on keeps them readable on the way past without their being the
 	thing you have to walk around.
+
+	Moved from X -132 when the hub was tightened: -132 is outside the stem and
+	would have left them standing in the void. -72 puts them against the stem's
+	west wall (walkable edge -80), still side-on to the walk north.
 ]]
-GameConfig.LeaderboardCenter = Vector3.new(-132, 0, 24)
+GameConfig.LeaderboardCenter = Vector3.new(-72, 0, 40)
 GameConfig.LeaderboardSpacing = 44
 GameConfig.LeaderboardHeight = 14
 --[[
