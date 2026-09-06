@@ -1,0 +1,7 @@
+# Matches what the codebase already does: hard tabs, and comment prose wrapped
+# near 120 so the long explanatory blocks keep their existing line breaks.
+column_width = 120
+indent_type = "Tabs"
+indent_width = 4
+quote_style = "AutoPreferDouble"
+call_parentheses = "Always"

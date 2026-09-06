@@ -388,7 +388,11 @@ function ConvertFrame:_buildBrainrotsTab(snapshot: ProfileSnapshot)
 
 	local summary = Theme.label(
 		("%d owned  |  %d / %d podiums used"):format(#owned, (function()
-			local n = 0 for _ in placedByUid do n += 1 end return n
+			local n = 0
+			for _ in placedByUid do
+				n += 1
+			end
+			return n
 		end)(), snapshot.plotSlots),
 		{
 			Size = UDim2.new(1, 0, 0, 26),
