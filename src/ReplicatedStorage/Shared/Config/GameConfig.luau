@@ -14,17 +14,25 @@ local GameConfig = {}
 -- Mine geometry
 -- ==========================================================================
 
--- Edge length of a single mine block, in studs. Blocks are Parts, never Terrain.
--- Changing this rescales the entire shaft; 4 keeps block count sane at depth.
-GameConfig.BlockSize = 4
+--[[
+	Edge length of a single mine block, in studs. Blocks are Parts, never Terrain.
 
--- Blocks per chunk axis. 4 -> chunks of 4x4x4 blocks = 16x16x16 studs = 64 parts.
+	Note what this does *not* change: a block's HP is BlockBaseHp * hpMultiplier *
+	hardness, with no size term, so a bigger block costs the same swings and
+	yields the same ore. What it changes is how much shaft one block covers --
+	at 6 a player descends 50% further per block broken than at 4, and the same
+	volume of mine is a third fewer parts to stream.
+]]
+GameConfig.BlockSize = 6
+
+-- Blocks per chunk axis. 4 -> chunks of 4x4x4 blocks = 24x24x24 studs = 64 parts.
 -- Larger chunks mean fewer streaming decisions but chunkier hitches on load.
 GameConfig.ChunkBlocks = 4
 
--- Half-width of the shaft in blocks. 6 -> a 13-block-wide square shaft (~52 studs).
--- Widen for more players mining side by side; costs parts linearly per layer.
-GameConfig.ShaftRadiusBlocks = 6
+-- Half-width of the shaft in blocks. 8 -> a 17-block-wide square shaft (~102
+-- studs). Widen for more players mining side by side; costs parts per layer as
+-- the square of this, so it is the expensive dimension to grow.
+GameConfig.ShaftRadiusBlocks = 8
 
 -- World Y of the mine ceiling. Depth is measured downward from here, so a block
 -- at Y = -120 sits at depth 120.
@@ -40,7 +48,7 @@ GameConfig.ShaftCenterZ = 80
 	Hub platform built by MineService, top surface at SurfaceY.
 
 	Two rectangles, not one square. The square was 720 across and the things
-	standing on it are not: the plot row spans X +-216 and the shaft is a 52-stud
+	standing on it are not: the plot row spans X +-216 and the shaft is a 102-stud
 	hole, so a single extent wide enough for the plots left ~250 studs of empty
 	lawn behind them and a shaft sitting in the middle of a field.
 
@@ -53,81 +61,51 @@ GameConfig.ShaftCenterZ = 80
 	reaching WallThickness inward, so the walkable figures are each of these
 	less 16.
 ]]
-GameConfig.HubPlotHalfX = 252 -- plot row reaches +-216; 20 studs of lawn, then wall
-GameConfig.HubPlotZMin = -188 -- plot backs are at -152, same 20-stud margin
-GameConfig.HubPlotZMax = -20 -- where the plot band ends and the stem takes over
-GameConfig.HubMineHalfX = 96 -- stem half-width; shaft is only +-26
-GameConfig.HubMineZMax = 162 -- stem's north rim; shaft's far lip is 106
+GameConfig.HubPlotHalfX = 196 -- plot row reaches +-161; 19 studs of lawn, then wall
+GameConfig.HubPlotZMin = -180 -- back pair dropped south to clear the arms; 16 studs to the wall
+
+--[[
+	Where the plot band ends and the stem takes over -- and therefore where the
+	shoulder wall runs. Walked north repeatedly as the row moved toward the mine.
+
+	**What actually limits it:** the plot band is tiled as one solid rectangle up
+	to here while only the stem is split around the shaft, so a value at or past
+	the shaft's south lip (ShaftCenterZ - shaftHalf = 29) tiles the band straight
+	over the hole. 22 leaves a 7-stud landing between the gateway and the lip.
+
+	It does *not* have to stay south of the spawn pad, which an earlier revision
+	of this comment claimed. The pad only needs floor under it, and the band is
+	floor too -- at 22 it straddles the seam, resting on tiles from both, which
+	is fine. Believing otherwise cost the row 12 studs it could have had.
+
+	Moving the shaft does not help either: the distance from the row to the lip
+	is (lip - HubPlotZMax) + WallThickness + margin, and shifting ShaftCenterZ
+	moves the lip and the gateway together. Only this value, the wall thickness
+	and the margin matter.
+]]
+GameConfig.HubPlotZMax = 25
+GameConfig.HubMineHalfX = 120 -- stem half-width; shaft is +-51, leaving 53 a side
+GameConfig.HubMineZMax = 180 -- stem's north rim; shaft's far lip is 131
 
 GameConfig.HubThickness = 20
 
 --[[
-	The hub floor is laid as square tiles rather than four big slabs, each tile
-	taking its own step of the grass ramp. Same trick the mine blocks use: a
-	single flat slab reads as a single flat slab no matter what material is on
-	it, and this is the cheapest way to get a lawn that looks drawn rather than
-	extruded (DESIGN.md 2a -- detail from geometry, not from texture, because a
-	texture needs an asset ID and this project ships none).
+	The hub floor: a flat two-tone checkerboard, laid as square tiles.
 
-	Dropped 40 -> 16 once the hub shrank. At 40 the lawn was ~73 tiles over the
-	tightened footprint and read as a handful of flat quadrants; 16 gives ~460,
-	which is back around what the old 720-square cost at its coarser pitch.
+	Matched to reference art. It used to be quantized noise -- the same hash the
+	mine blocks use, deliberately irregular so the lawn read as ground rather
+	than a tiled floor. The reference does the opposite: a regular checker, flat
+	colour, no material grain, the same treatment as the walls. So the noise is
+	gone and the two shades alternate on (column + row).
 
-	Every rectangle's edges must land exactly where they were asked -- the shaft
-	opening is defined by the mine's block grid -- so the span is divided into
-	equal columns rather than stepped at a fixed pitch and clamped. Clamping
-	lands the edges too, but leaves a sliver tile along two edges of every
-	rectangle, which is exactly the defect the wall had.
+	Still geometry rather than a texture -- DESIGN.md 2a, and a texture would
+	need an asset ID this project does not ship.
 ]]
-GameConfig.HubTileSize = 16
+GameConfig.HubTileSize = 12
 
---[[
-	Lawn relief. Each tile's top is dropped by 0, half, or all of this.
-
-	Downward, not upward: the path sits only PathRaise above the surface, and a
-	lawn tile lifted higher than that would poke through it. Sinking instead
-	keeps SurfaceY the ceiling, so anything laid on the lawn stays on top of it.
-]]
-GameConfig.HubRelief = 0.35
-
---[[
-	Ground scatter -- grass clumps and the odd stone sitting on the lawn.
-
-	Placed per floor tile rather than free-scattered, so density follows the
-	lawn and nothing needs a spatial index. Non-colliding, so a player never
-	catches on one. Seeded, because the world is shared and every server has to
-	grow the same lawn.
-]]
-GameConfig.HubScatterSeed = 20260905
-GameConfig.HubScatterChance = 0.3 -- of lawn tiles that get a clump
-GameConfig.HubScatterStoneChance = 0.18 -- of those clumps, how many are stone
-GameConfig.HubScatterSizeMin = 2.5
-GameConfig.HubScatterSizeMax = 5.5
-GameConfig.HubScatterHeightMin = 0.9
-GameConfig.HubScatterHeightMax = 2.4
-
---[[
-	The path from the plots to the shaft.
-
-	A spine running north from the plot row to the spawn pad, and a cross bar in
-	front of the plots feeding into it. Without it the hub is an undifferentiated
-	green field and nothing tells a new player which way the mine is.
-
-	Laid as tiles like the lawn, in the same dirt colour as Topsoil, and raised a
-	hair above the grass so the two never z-fight where they overlap.
-
-	Width 16 with a 16-stud tile made the spine literally one paver wide and the
-	cross bar one paver deep, which is why it read as a row of big squares. 28
-	wide on an 8-stud paver is four across -- a path rather than a line of tiles.
-]]
-GameConfig.PathTileSize = 8
-GameConfig.PathWidth = 28
-GameConfig.PathRaise = 0.05
-
--- Paver relief, upward: the path is already above the lawn, so lifting is safe
--- here where it is not on the grass. Smaller than the lawn's, because an uneven
--- path reads as broken rather than natural.
-GameConfig.PathRelief = 0.12
+-- The two floor checker steps, as palette indices. Same idea as the wall's,
+-- and far enough apart to read as a check rather than as uneven lighting.
+GameConfig.HubCheckerShades = { 1, 3 }
 
 -- Blocks materialized per streaming tick. Caps the cost of a single pass so a
 -- player teleporting to a fresh depth spreads the work over a few frames
@@ -144,10 +122,95 @@ GameConfig.MaxBlocksPerStreamTick = 220
 	deferred.
 
 	SafeLoadRadius must comfortably exceed how far a player travels in one
-	ChunkStreamTickSeconds (walkspeed 16 -> 8 studs, plus fall speed).
-]]
-GameConfig.SafeLoadRadius = 40
+	ChunkStreamTickSeconds, plus fall speed. Walk speed is 24 (set as
+	StarterPlayer.CharacterWalkSpeed in default.project.json, the same way
+	FallenPartsDestroyHeight is -- neither is writable from a script), so a tick
+	covers 12 studs against 8 at the old default of 16. 40 was a 5x margin then;
+	48 keeps it above 4x now.
 
+	Blocks are 6 studs, so this radius is 8 blocks rather than the 10 it was at
+	BlockSize 4 -- the safe set is fewer parts than the number suggests.
+]]
+GameConfig.SafeLoadRadius = 48
+
+--[[
+	The plaza: the paved square between the four bases and the mine, and the
+	place the shops stand.
+
+	This replaced a stone path -- a cross bar, a spine to the shaft, two spurs
+	and a branch east to the shops. The path was the right shape for a hub whose
+	shops lived off in the stem beside the shaft, but it made the courtyard the
+	bases face into a lawn you crossed rather than a place you arrived at. One
+	square does the same connecting job and gives the shops somewhere to be.
+
+	Its bounds are not written down here. MineService derives them from the plot
+	row and the shaft lip, so moving a plot moves the plaza with it rather than
+	silently opening a strip of lawn between the two.
+
+	Raised PlazaRaise above the lawn. The lawn tiles run underneath it, and a
+	flush slab would sit coplanar with them and z-fight -- the same trap the plot
+	floors and the wall footing both fell into.
+]]
+GameConfig.PlazaTileSize = 10
+GameConfig.PlazaRaise = 0.05
+GameConfig.PlazaColor = Color3.fromRGB(150, 158, 170)
+GameConfig.PlazaCheckerShades = { 1, 2 } -- adjacent steps: paving joints, not a chequerboard
+GameConfig.PlazaBorderShade = 4 -- one darker course all round, so the square has an edge
+
+--[[
+	Lamp standards around the plaza, given as offsets from its own bounds so the
+	ring survives the plaza being resized.
+
+	`inset` is how far in from the edge they stand; the two rows sit clear of the
+	turned plots' entrances and of the spawn pad. Neon heads and no PointLight:
+	this is an outdoor daylight surface, and the hub's light budget is spent on
+	the plot interiors, where the roof cuts the skylight.
+]]
+GameConfig.PlazaLampInset = 8
+GameConfig.PlazaLampsPerRow = 5
+GameConfig.PlazaLampHeight = 17
+
+--[[
+	Centre monument: a stepped plinth carrying the same crossed-hammer emblem as
+	the plot headers. Geometry only, like everything else here.
+]]
+GameConfig.PlazaMonumentSteps = 3
+GameConfig.PlazaMonumentBase = 18
+
+GameConfig.PlazaPalette = {
+	kerb = Color3.fromRGB(120, 128, 140),
+	stone = Color3.fromRGB(96, 104, 118),
+	post = Color3.fromRGB(52, 58, 70),
+	lamp = Color3.fromRGB(255, 246, 224),
+	emblem = Color3.fromRGB(214, 221, 230),
+}
+
+--[[
+	Shops, standing on the plaza rather than off in the stem beside the shaft.
+
+	Both are scenery for now: the sell and convert flows already exist as
+	RequestSell / RequestConvert and are driven from the UI, so these give them a
+	place in the world rather than a second way to invoke them.
+
+	Positions are the centres of their footprints. They flank the middle of the
+	square, and they face the way their geometry already points -- the stall's
+	counter is on its south side, so it meets a player walking up from the back
+	pair of bases, and the cabinet's screen is on its west side, so it faces the
+	square from the east flank.
+]]
+GameConfig.ShopStallPosition = Vector3.new(-56, 0, -22)
+GameConfig.ShopConverterPosition = Vector3.new(58, 0, -22)
+
+GameConfig.ShopPalette = {
+	stripeA = Color3.fromRGB(206, 62, 62), -- awning red
+	stripeB = Color3.fromRGB(240, 240, 240),
+	wood = Color3.fromRGB(120, 92, 64),
+	post = Color3.fromRGB(88, 78, 70),
+	machineBody = Color3.fromRGB(36, 42, 62),
+	machineTrim = Color3.fromRGB(70, 108, 188),
+	machineGlow = Color3.fromRGB(92, 208, 255),
+	pad = Color3.fromRGB(46, 190, 120), -- the standing circle; Neon washes a paler green to white
+}
 --[[
 	The retaining wall.
 
@@ -163,67 +226,41 @@ GameConfig.SafeLoadRadius = 40
 	WallThickness on the rim and reaches inward by nothing, so that whole class
 	of bug is gone with it.
 
-	The pattern is a true checkerboard, which is a deliberate break from the
-	lawn's quantized noise. The lawn wants to read as ground, where a regular
-	grid would look like a tiled floor instead; the wall is a built structure,
-	and a built structure is exactly where a regular grid belongs.
-
-	Sizing: tiles are square at WallTileSize, and WallHeight is kept a whole
-	multiple of it so the top row is never a sliver. 24 into 96 gives 4 rows,
-	and about 290 parts around the two bands' 1730-stud outline -- down from 480
-	when the hub was a 2880-stud square, and comfortably under the lawn's ~320.
+	Wall and lawn are both checkerboards now, matched to reference art. The lawn
+	used to be quantized noise so it would read as ground rather than as a tiled
+	floor; the reference gives both surfaces the same regular grid, so that
+	distinction is gone.
 ]]
-GameConfig.WallHeight = 96 -- face height, plinth included, before the coping goes on
+GameConfig.WallHeight = 60 -- studs of checkered face standing above SurfaceY
 GameConfig.WallThickness = 16 -- inward from the hub rim
 
 --[[
-	Face detailing.
+	Wall face.
 
-	A 96-stud slab in one flat plane of 24-stud squares read as a box no matter
-	what colour was on it. The fix is the one DESIGN.md already prescribes for
-	sub-block detail -- more geometry, not smoother geometry -- so the face is
-	now a proper wall section: a plinth at the bottom, a finer checker above it,
-	a string course under an overhanging coping, and pilasters at intervals to
-	break the long runs.
+	A flat checkerboard and a grass coping, and nothing else. The plinth, string
+	course, per-tile relief and pilasters that used to be here are gone: the
+	reference walls are unbroken planes of fine check with a green lip on top,
+	and every one of those details read as an interruption against it.
 
-	Tiles dropped 24 -> 16, which also puts the checker density closer to the
-	reference art (5 rows of face instead of 3). (WallHeight - WallPlinthHeight)
-	must stay a whole multiple of WallTileSize or the top row comes out a sliver.
+	WallHeight must stay a whole multiple of WallTileSize or the top row comes
+	out a sliver. 10 into 60 gives 6 rows, which is about what the reference
+	shows across a wall of this height.
 ]]
-GameConfig.WallTileSize = 16 -- square checker tile; (96 - 16) / 16 = 5 rows
-GameConfig.WallPlinthHeight = 16 -- base course, one tile row tall
-GameConfig.WallStringHeight = 4 -- thin band between the face and the coping
-GameConfig.WallCapHeight = 7 -- the grass coping itself
-GameConfig.WallCapOverhang = 3 -- coping oversails both faces, for a shadow line
-GameConfig.WallProud = 2 -- how far the plinth and string course stand out
-
---[[
-	Per-tile relief. Each tile is pushed out from the rim by 0, half, or all of
-	this, picked by the same hash the mine blocks use for shade. Small on
-	purpose: enough that the face catches light unevenly and stops reading as a
-	single plane, not so much that it looks damaged.
-]]
-GameConfig.WallRelief = 0.6
-
--- Buttresses along each run, and on its first and last column -- so every
--- corner gets one, and the 504-stud south run is not one unbroken sweep.
--- A pilaster occupies a whole column of the face grid rather than a fixed
--- width: off the grid it cut tiles in half and left slivers down its sides.
-GameConfig.WallPilasterSpacing = 64
-GameConfig.WallPilasterProud = 3
+GameConfig.WallTileSize = 10 -- square checker tile; 60 / 10 = 6 rows
+GameConfig.WallCapHeight = 7 -- the grass coping
+GameConfig.WallCapOverhang = 3 -- oversails both faces and both ends, so corners close
+GameConfig.WallFootingDepth = 1.5 -- skirt outside the rim, hiding the floor slab edge
 
 -- The two checker steps, as indices into the shade palette. Far apart on
 -- purpose: adjacent steps are a 7% difference and read as one flat colour at
 -- any distance.
 GameConfig.WallCheckerShades = { 0, 3 }
 
--- Pushed warm and saturated on purpose, which looks wrong written down:
--- cartoonify multiplies saturation by 1.45, leaving the base at 168,93,25.
--- But every face of the wall points inward, away from the sun, and
--- SurfaceAmbient is a blue-grey -- which drains a gentler brown to mauve. The
--- flat material carries no texture to hide that either. Tuned against a lit
--- screenshot rather than on paper; re-tune it the same way.
-GameConfig.WallColor = Color3.fromRGB(150, 104, 62)
+-- Warm tan, matched to the reference walls, and lighter than the brown it
+-- replaced -- that one was pushed hard to survive being read in shadow. The
+-- 1.45 saturation multiplier still applies, so this lands around 222,157,92
+-- rather than the orange that a naively "tan-looking" pick turns into.
+GameConfig.WallColor = Color3.fromRGB(198, 158, 118)
 
 -- A player below the mine floor by this much has fallen out of the world and
 -- gets returned to the hub. Generous enough that legitimately standing on the
@@ -325,7 +362,7 @@ GameConfig.GrassMaxRow = 0
 	player sees is a recognisable landscape. Below this depth ore generates
 	normally.
 
-	Rows, not studs: 2 rows at BlockSize 4 is the top 8 studs.
+	Rows, not studs: 2 rows at BlockSize 6 is the top 12 studs.
 ]]
 GameConfig.OreFreeSurfaceRows = 2
 
@@ -583,8 +620,46 @@ GameConfig.MaxPlotSlots = 24
 	The row sits inside the hub slab rather than 600 studs away across empty
 	space, so the walk from the shaft to your podiums is a few seconds.
 ]]
-GameConfig.PlotCount = 4
-GameConfig.PlotOrigin = Vector3.new(-168, 0, -120)
+--[[
+	Where each plot sits, and which way it faces.
+
+	A plot's open side is its local +Z, so `yaw` is what points that side
+	somewhere: 0 faces north up the map toward the shaft, +90 faces east, -90
+	west. The two end plots are turned inward, which makes the row a shallow U
+	opening onto the walk north -- every plot's podiums face the courtyard
+	instead of two of them presenting a side wall to it.
+
+	Explicit coordinates rather than origin-plus-spacing: once two of the four
+	are rotated, the footprints stop being interchangeable (a turned plot is
+	PlotDepth wide and PlotWidth deep) and a single pitch cannot express the
+	arrangement.
+
+	The two turned plots are the arms, standing forward to flank the entrance;
+	the unturned pair sits behind them. The four are separated in Z as well as
+	X, so no two share a band of the map -- each reads as its own building.
+
+	Getting that separation cost the back pair its proximity, and there was no
+	way around it. The arms can only come forward as far as the shoulder wall
+	allows (HubPlotZMax, capped by the shaft lip -- see its note), which was 7
+	studs of the 24 they overlapped by. The remaining 17 had to come from the
+	back pair moving south, which is why they are now ~116 studs off the lip
+	while the arms are 28.
+
+	Footprints at PlotWidth 80 / PlotDepth 56 (including roof overhang):
+	  1  x -162..-102  z  -83..   1   (turned, opens east)
+	  2  x  -90..  -6  z -148.. -86
+	  3  x    6..  90  z -148.. -86
+	  4  x  102.. 162  z  -83..   1   (turned, opens west)
+	4-stud gap between the arms and the back pair; 12-stud gaps across the middle.
+]]
+GameConfig.PlotLayout = {
+	{ position = Vector3.new(-132, 0, -41), yaw = 90 },
+	{ position = Vector3.new(-48, 0, -118), yaw = 0 },
+	{ position = Vector3.new(48, 0, -118), yaw = 0 },
+	{ position = Vector3.new(132, 0, -41), yaw = -90 },
+}
+
+GameConfig.PlotCount = #GameConfig.PlotLayout
 
 --[[
 	Leaderboards: a row along Z on the west side of the stem, turned to face
@@ -596,31 +671,156 @@ GameConfig.PlotOrigin = Vector3.new(-168, 0, -120)
 	them side-on keeps them readable on the way past without their being the
 	thing you have to walk around.
 
-	Moved from X -132 when the hub was tightened: -132 is outside the stem and
-	would have left them standing in the void. -72 puts them against the stem's
-	west wall (walkable edge -80), still side-on to the walk north.
+	X -72 puts them against the stem's west wall (walkable edge -104). Z moved
+	40 -> 60 when HubPlotZMax was pushed north to 0: at 40 the nearer board
+	reached z -1, which after that move was inside the gateway rather than past
+	it, so it stood in the doorway.
 ]]
-GameConfig.LeaderboardCenter = Vector3.new(-72, 0, 40)
+GameConfig.LeaderboardCenter = Vector3.new(-72, 0, 70)
 GameConfig.LeaderboardSpacing = 44
 GameConfig.LeaderboardHeight = 14
 --[[
-	Width is set by the podium grid: PodiumsPerRow (6) at PodiumSpacing (14) is
-	70 studs plus a podium, so anything under ~86 pushes podiums through the
-	side walls. Depth only needs the 4 rows that hold MaxPlotSlots, which is 50,
-	so it was trimmed from 96 -- a row of four 96-deep plots made the hub wider
-	than the ridge could close around.
+	Plot size is set by the podium grid it has to hold: PodiumsPerRow (6) at
+	PodiumSpacing (12) spans 60 studs of centres plus a podium, so 68, and the
+	4 rows that hold MaxPlotSlots span 36 plus a podium, so 44. Anything under
+	those pushes podiums through the side walls.
+
+	80 x 56 leaves 6 studs of margin on each axis. Getting smaller again means
+	tightening PodiumSpacing or dropping PodiumsPerRow first -- the walls cannot
+	come in on their own.
 ]]
-GameConfig.PlotWidth = 96
-GameConfig.PlotDepth = 64
-GameConfig.PlotSpacing = 16 -- gap between neighbouring plots
-GameConfig.PlotWallHeight = 12
+GameConfig.PlotWidth = 80
+GameConfig.PlotDepth = 56
+
+--[[
+	A plot is a mining-base pavilion, not a walled shed.
+
+	Restyled off the "MINING BASE" reference: a charcoal frame of pillars under
+	a deep overhanging roof, glazed side bays either side of an open entrance,
+	a lit rarity display wall at the back, recessed ceiling panels, and an
+	arched name header carrying a crossed-hammer emblem.
+
+	What this replaced was three solid stone walls. Those read as a bunker from
+	outside and hid the podium grid until you had walked in, which is backwards
+	for the one structure whose whole job is to show off what you own. Glass on
+	the sides and the front bays is the change that matters; everything else
+	here is trim on top of it.
+]]
+GameConfig.PlotWallHeight = 22
 GameConfig.PlotWallThickness = 2
+GameConfig.PlotRoofThickness = 4
+GameConfig.PlotRoofOverhang = 2 -- roof oversails the walls; above head height, so it costs no floor
+GameConfig.PlotPillarSize = 6 -- square corner pillars, inset to sit flush in plan
+GameConfig.PlotFasciaHeight = 5 -- band under the front roof edge, carrying the header
+
+--[[
+	The two facade pillars that split the front into two glazed bays and a
+	central opening.
+
+	Offset is from the plot centre. At 18 the bays are 18 wide and the entrance
+	36, which is the reference's rhythm. They are shallow in Z and pushed to the
+	front edge deliberately: the front podium row's face is at PodiumSpacing *
+	1.5 + PodiumSize.X / 2 = 22, so anything thicker than PlotDepth / 2 - 22 = 6
+	starts eating podium 19-24.
+]]
+GameConfig.PlotFrontPillarOffsetX = 18
+GameConfig.PlotFrontPillarWidth = 6
+GameConfig.PlotFrontPillarDepth = 6
+
+--[[
+	Glazing. A solid dado carries the glass up off the slab -- glass landing on
+	the floor reads as a hole, not a window -- and a head rail closes it under
+	the roof. Panes are divided across the run, never stepped-and-clamped; the
+	sliver-tile trap the hub floor, wall and path each fell into applies just as
+	much to a wall of windows.
+]]
+GameConfig.PlotGlassDadoHeight = 3
+GameConfig.PlotGlassHeadHeight = 2
+GameConfig.PlotGlassPanesPerSide = 4
+GameConfig.PlotMullionWidth = 1.2
+GameConfig.PlotGlassTransparency = 0.62
+GameConfig.PlotGlassReflectance = 0.12
+
+--[[
+	Recessed ceiling panels, in a grid rather than the old four long strips.
+	Neon only glows, it does not light anything, and the roof cuts the skylight,
+	so every Nth panel carries a real PointLight. Kept at two per plot: four
+	plots times a lamp per panel would be 32 lights on a budget the hub already
+	fought for.
+]]
+GameConfig.PlotCeilingPanelCols = 4
+GameConfig.PlotCeilingPanelRows = 2
+GameConfig.PlotCeilingLampEvery = 3
+GameConfig.PlotLampRange = 44
+GameConfig.PlotLampBrightness = 1.8
+
+--[[
+	Rarity display cases along the back wall, filled from Rarity.ORDER so the
+	colours are the same ones every UI surface uses. Five, not six: the
+	reference shows a five-case run, and Mythic reads better as the thing the
+	cases do not promise you.
+
+	They sit in the 6 studs between the back wall's inner face and the rear
+	podium row, so they cost no slot.
+]]
+GameConfig.PlotDisplayCases = 5
+GameConfig.PlotDisplayCaseSize = Vector3.new(13, 9, 3)
+GameConfig.PlotDisplayCaseY = 12.5 -- clear of a brainrot standing on the rear podium row (podium top 3 + BrainrotHeight 6)
+
+--[[
+	The arched header over the entrance. The project ships no meshes, so a curve
+	is a stack of blocks: PlotArchSteps blocks across the parapet, each rising to
+	a sine hump PlotArchRise tall. Thirteen reads as an arch; below about seven it
+	reads as a staircase.
+]]
+GameConfig.PlotArchSteps = 13
+GameConfig.PlotArchRise = 6
+GameConfig.PlotParapetWidth = 48
+GameConfig.PlotParapetHeight = 12
+
+-- Kerb apron across the plot front. Stands proud of the floor rather than flush
+-- so it reads as a step up onto the forecourt from the lawn.
+GameConfig.PlotKerbDepth = 4
+GameConfig.PlotKerbRaise = 0.5
+
+-- Free-standing forecourt sign, this far proud of the plot's front edge. Small
+-- enough not to disturb the row's clearances, which are measured off PlotDepth.
+GameConfig.PlotStreetSignForward = 5
+
+--[[
+	Palette. Raw Color3 rather than the hub's cartoonify pipeline: these are
+	already muted blue-greys and a 1.45 saturation multiplier turns the charcoal
+	lilac.
+
+	`light` used to be gold. The reference's ceiling panels and pillar strips are
+	white, and gold ones washed the whole interior warm.
+]]
+GameConfig.PlotPalette = {
+	frame = Color3.fromRGB(52, 58, 70), -- pillars, roof, fascia: the charcoal shell
+	frameDark = Color3.fromRGB(34, 39, 49), -- recesses, the display wall, sign faces
+	mullion = Color3.fromRGB(92, 101, 116), -- glazing bars between panes
+	glass = Color3.fromRGB(150, 196, 228),
+	accentMetal = Color3.fromRGB(214, 221, 230),
+	light = Color3.fromRGB(252, 253, 255), -- the emissive panels themselves
+	lamp = Color3.fromRGB(255, 250, 240), -- what those panels cast: warm white
+	floor = Color3.fromRGB(198, 202, 209),
+	kerb = Color3.fromRGB(166, 173, 182),
+	sign = Color3.fromRGB(30, 35, 45),
+	podium = Color3.fromRGB(112, 124, 144),
+}
+--[[
+	Plot floor. Raised a hair above SurfaceY rather than laid flush: the lawn
+	tiles run underneath the whole plot, and a flush slab put 42 of them
+	coplanar with it, which z-fought as green streaks through the floor. Same
+	fix the path used to have, and the same trap the wall footing fell into.
+]]
 GameConfig.PlotFloorThickness = 4
+GameConfig.PlotFloorRaise = 0.06
 
 -- Podiums are laid out in a grid on the plot floor. 6 x 4 holds MaxPlotSlots.
 GameConfig.PodiumsPerRow = 6
 GameConfig.PodiumSize = Vector3.new(8, 3, 8)
-GameConfig.PodiumSpacing = 14
+GameConfig.PodiumSpacing = 12
 
 -- Brainrot models are scaled to roughly this height so a Mythic doesn't
 -- dwarf the plot and a Common isn't invisible.

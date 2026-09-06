@@ -815,20 +815,24 @@ local function grassBase(): Color3
 end
 
 --[[
-	Fills a rectangle with floor tiles at roughly HubTileSize.
+	Fills a rectangle with floor tiles at roughly HubTileSize, two shades
+	alternating on a checkerboard.
 
-	The rectangle's edges must land exactly where they were asked to -- the
-	shaft opening is defined by the mine's block grid, and a pitch that missed
-	would widen the hole or crowd it. This used to clamp the last row and column
-	to manage that, which landed the edges but left a sliver tile along two of
-	them on every rectangle. Dividing the span into equal parts lands the edges
-	just as exactly and leaves every tile identical.
+	The rectangle's edges must land exactly where they were asked to -- the shaft
+	opening is defined by the mine's block grid, and a pitch that missed would
+	widen the hole or crowd it. Dividing the span into equal parts lands them
+	exactly while leaving every tile identical; stepping a fixed pitch and
+	clamping the last row also lands them, but leaves a sliver down two edges.
 
-	Tops are dropped by up to HubRelief so the lawn is not one flat plane.
+	Parity is per rectangle, off the column and row index. The five rectangles
+	have their own pitches, so a world-coordinate parity would not stay in phase
+	across them anyway, and the seams fall on the shaft lip where the check is
+	interrupted regardless.
 ]]
 local function tileFloor(name: string, minX: number, maxX: number, minZ: number, maxZ: number, base: Color3)
 	local pitch = GameConfig.HubTileSize
 	local thickness = GameConfig.HubThickness
+	local shades = GameConfig.HubCheckerShades
 
 	local sizeX, sizeZ = maxX - minX, maxZ - minZ
 	if sizeX <= 0 or sizeZ <= 0 then
@@ -845,163 +849,19 @@ local function tileFloor(name: string, minX: number, maxX: number, minZ: number,
 		for iz = 0, rows - 1 do
 			local z0 = minZ + iz * stepZ
 
-			-- Same hash the mine blocks use, on tile indices, so the lawn is
-			-- quantized noise rather than a checkerboard or a gradient.
-			local shade = shadeOf(math.floor(x0 / pitch), 0, math.floor(z0 / pitch))
-			local drop = (shade % 3) * 0.5 * GameConfig.HubRelief
-
 			local tile = Instance.new("Part")
 			tile.Name = name
 			tile.Anchored = true
 			tile.Locked = true
 			tile.Size = Vector3.new(stepX, thickness, stepZ)
-			tile.Position =
-				Vector3.new(x0 + stepX * 0.5, GameConfig.SurfaceY - drop - thickness * 0.5, z0 + stepZ * 0.5)
-			tile.Color = quantize(base, shade)
-			tile.Material = Enum.Material.LeafyGrass
+			tile.Position = Vector3.new(x0 + stepX * 0.5, GameConfig.SurfaceY - thickness * 0.5, z0 + stepZ * 0.5)
+			tile.Color = quantize(base, shades[(ix + iz) % 2 + 1])
+			tile.Material = Enum.Material.SmoothPlastic
 			tile.TopSurface = Enum.SurfaceType.Smooth
 			tile.BottomSurface = Enum.SurfaceType.Smooth
 			tile.Parent = hubFolder
 		end
 	end
-end
-
---[[
-	The two rectangles the path is made of. Shared, so buildPath can lay them
-	and the ground scatter can avoid them without either restating the
-	arithmetic that positions them against the plot row and the shaft lip.
-]]
-local function pathRects()
-	local shaftHalf = (RADIUS + 0.5) * BLOCK
-	local plotSpacing = GameConfig.PlotWidth + GameConfig.PlotSpacing
-	local firstPlotX = GameConfig.PlotOrigin.X
-	local lastPlotX = firstPlotX + (GameConfig.PlotCount - 1) * plotSpacing
-	local half = GameConfig.PathWidth * 0.5
-
-	-- Front edge of the plot row, and the near lip of the shaft.
-	local plotFrontZ = GameConfig.PlotOrigin.Z + GameConfig.PlotDepth * 0.5
-	local shaftFrontZ = GameConfig.ShaftCenterZ - shaftHalf
-
-	return {
-		-- Cross bar, wide enough to meet the outermost plots square on.
-		{
-			name = "PathCross",
-			minX = firstPlotX - half,
-			maxX = lastPlotX + half,
-			minZ = plotFrontZ,
-			maxZ = plotFrontZ + GameConfig.PathWidth,
-		},
-		-- Spine, from the cross bar to the shaft lip.
-		{
-			name = "PathSpine",
-			minX = GameConfig.ShaftCenterX - half,
-			maxX = GameConfig.ShaftCenterX + half,
-			minZ = plotFrontZ + GameConfig.PathWidth,
-			maxZ = shaftFrontZ,
-		},
-	}
-end
-
---[[
-	Sparse ground detail: grass clumps and the odd stone sitting on the lawn.
-
-	Walks the lawn tiles that were just laid rather than re-deriving the grid,
-	so density follows the floor wherever it goes. Anything already built on the
-	lawn is skipped -- the plot row, both path strips, the spawn pad -- since a
-	tuft under a plot floor is a part nobody will ever see. The shaft is a hole
-	in the floor, so it excludes itself.
-
-	Non-colliding: these are ankle height and a player should walk through them,
-	not over them.
-]]
-local function scatterLawn(): number
-	local rng = Random.new(GameConfig.HubScatterSeed)
-	local grass = grassBase()
-	-- Warm, not blue. The obvious neutral grey comes out of cartoonify's 1.45
-	-- saturation as a cold slate that reads like ice against the grass.
-	local stone = cartoonify(Color3.fromRGB(134, 126, 116))
-	local shaftHalf = (RADIUS + 0.5) * BLOCK
-	local built = 0
-
-	local blocked = pathRects()
-
-	local plotSpacing = GameConfig.PlotWidth + GameConfig.PlotSpacing
-	local firstPlotX = GameConfig.PlotOrigin.X
-	local lastPlotX = firstPlotX + (GameConfig.PlotCount - 1) * plotSpacing
-	table.insert(blocked, {
-		minX = firstPlotX - GameConfig.PlotWidth * 0.5,
-		maxX = lastPlotX + GameConfig.PlotWidth * 0.5,
-		minZ = GameConfig.PlotOrigin.Z - GameConfig.PlotDepth * 0.5,
-		maxZ = GameConfig.PlotOrigin.Z + GameConfig.PlotDepth * 0.5,
-	})
-	table.insert(blocked, {
-		minX = GameConfig.ShaftCenterX - 10,
-		maxX = GameConfig.ShaftCenterX + 10,
-		minZ = GameConfig.ShaftCenterZ - shaftHalf - 14,
-		maxZ = GameConfig.ShaftCenterZ - shaftHalf + 2,
-	})
-
-	--[[
-		Grown by half the widest clump, because the test below is against a
-		clump's centre. Unpadded, one centred just outside the path still
-		overhangs it by up to half its width, which is exactly what turned up on
-		the path edge the first time this ran.
-	]]
-	local pad = GameConfig.HubScatterSizeMax * 0.5 + 1
-	for _, r in blocked do
-		r.minX -= pad
-		r.maxX += pad
-		r.minZ -= pad
-		r.maxZ += pad
-	end
-
-	local function isBlocked(x: number, z: number): boolean
-		for _, r in blocked do
-			if x >= r.minX and x <= r.maxX and z >= r.minZ and z <= r.maxZ then
-				return true
-			end
-		end
-		return false
-	end
-
-	-- GetChildren is a snapshot, so parenting the clumps in as we go is safe.
-	for _, tile in hubFolder:GetChildren() do
-		if tile:IsA("BasePart") and tile.Name:match("^HubTile") and rng:NextNumber() < GameConfig.HubScatterChance then
-			local x = tile.Position.X + rng:NextNumber(-tile.Size.X * 0.3, tile.Size.X * 0.3)
-			local z = tile.Position.Z + rng:NextNumber(-tile.Size.Z * 0.3, tile.Size.Z * 0.3)
-
-			if not isBlocked(x, z) then
-				local isStone = rng:NextNumber() < GameConfig.HubScatterStoneChance
-				local width = rng:NextNumber(GameConfig.HubScatterSizeMin, GameConfig.HubScatterSizeMax)
-				local tall = rng:NextNumber(GameConfig.HubScatterHeightMin, GameConfig.HubScatterHeightMax)
-				if isStone then
-					tall *= 0.45
-				end
-
-				local clump = Instance.new("Part")
-				clump.Name = if isStone then "LawnStone" else "LawnTuft"
-				clump.Anchored = true
-				clump.Locked = true
-				clump.CanCollide = false
-				clump.CanQuery = false
-				clump.Size = Vector3.new(width, tall, width * rng:NextNumber(0.7, 1.3))
-				-- Sunk slightly, so nothing floats over a tile that dropped away.
-				clump.CFrame = CFrame.new(x, tile.Position.Y + tile.Size.Y * 0.5 + tall * 0.5 - 0.4, z)
-					* CFrame.Angles(0, rng:NextNumber(0, math.pi * 2), 0)
-				clump.Color = quantize(
-					if isStone then stone else grass,
-					rng:NextInteger(0, GameConfig.PaletteShades - 1)
-				)
-				clump.Material = if isStone then Enum.Material.Slate else Enum.Material.LeafyGrass
-				clump.TopSurface = Enum.SurfaceType.Smooth
-				clump.BottomSurface = Enum.SurfaceType.Smooth
-				clump.Parent = hubFolder
-				built += 1
-			end
-		end
-	end
-
-	return built
 end
 
 local function buildHub()
@@ -1031,9 +891,6 @@ local function buildHub()
 		tileFloor(`HubTile{index}`, slab.minX, slab.maxX, slab.minZ, slab.maxZ, base)
 	end
 
-	-- After the slabs, so it can walk the tiles it is decorating.
-	scatterLawn()
-
 	-- Spawn right at the lip of the shaft. Anywhere further and a new player has
 	-- to work out which part of the field they're meant to walk to.
 	--
@@ -1053,7 +910,7 @@ local function buildHub()
 end
 
 --[[
-	The retaining wall: a parapet standing on the hub's rim.
+	The retaining wall: a checkerboard face on the hub's rim, capped with grass.
 
 	The outline is the two bands' union, walked as eight straight runs. Each run
 	stops where the next begins rather than overlapping, so no corner is built
@@ -1062,16 +919,18 @@ end
 	walls leave. Where the bands meet, the shoulder runs and the stem's side
 	walls share a south face, so the join reads as one flush gateway.
 
-	Each run is built as a wall section rather than a slab: a plinth, a checker
-	face whose tiles stand out by varying amounts, a string course, an
-	oversailing grass coping, and pilasters flush with both ends and spaced
-	along the middle. All of it is still boxes -- DESIGN.md §2a rules out meshes
-	and textures, so the only way to stop a wall reading as one is to give it
-	more edges, which is the same answer the mine gives to sub-block detail.
+	Flat by intent. This carried a plinth, per-tile relief, a string course and
+	pilasters; the reference art is an unbroken plane of fine check under a green
+	lip, and against that every one of those details read as an interruption. The
+	only thing standing off the face now is the coping's oversail.
 
 	A run is described by its long axis and the rim it stands on: `bOuter` is
-	that rim's coordinate and `inward` the direction the wall thickens. Every
-	course is then the same arithmetic regardless of which way the run faces.
+	that rim's coordinate and `inward` the direction the wall thickens, so every
+	course is the same arithmetic regardless of which way the run faces.
+
+	Columns divide the run's length evenly rather than stepping a fixed pitch and
+	clamping -- clamping leaves a sliver tile at the end of every run, which is a
+	visible break in the check at eight corners.
 ]]
 local wallTileCount = 0
 
@@ -1080,8 +939,6 @@ local function buildWall()
 	local surface = GameConfig.SurfaceY
 	local t = GameConfig.WallThickness
 	local height = GameConfig.WallHeight
-	local plinthH = GameConfig.WallPlinthHeight
-	local stringH = GameConfig.WallStringHeight
 	local capH = GameConfig.WallCapHeight
 
 	local px = GameConfig.HubPlotHalfX
@@ -1092,9 +949,8 @@ local function buildWall()
 
 	local dirt = cartoonify(GameConfig.WallColor)
 	local shades = GameConfig.WallCheckerShades
-	local trim = quantize(dirt, 0)
 	local grass = quantize(grassBase(), GameConfig.PaletteShades - 1)
-	local rows = math.max(1, math.floor((height - plinthH) / pitch))
+	local rows = math.max(1, math.round(height / pitch))
 	local built = 0
 
 	local function box(name, x, y, z, sx, sy, sz, colour, material)
@@ -1114,9 +970,8 @@ local function buildWall()
 
 	--[[
 		Lays one course. `aFrom`/`aTo` bound it along the run, `depth` is how far
-		it reaches from the rim (so t is flush, t + n stands n proud), and the
-		y pair is its vertical span. Handles both run orientations so no course
-		has to know which way it faces.
+		it reaches from the rim, and the y pair is its vertical span. Handles both
+		run orientations so no course has to know which way it faces.
 	]]
 	local function course(r, name, aFrom, aTo, depth, y0, y1, colour, material)
 		if aTo <= aFrom then
@@ -1133,118 +988,81 @@ local function buildWall()
 		end
 	end
 
-	-- name, alongX, aFrom, aTo, bOuter, inward
 	local runs = {
 		{ name = "WallPlotSouth", alongX = true, aFrom = -px, aTo = px, bOuter = pz, inward = 1 },
 		{ name = "WallPlotWest", alongX = false, aFrom = pz + t, aTo = join, bOuter = -px, inward = 1 },
 		{ name = "WallPlotEast", alongX = false, aFrom = pz + t, aTo = join, bOuter = px, inward = -1 },
 		{ name = "WallShoulderWest", alongX = true, aFrom = -px + t, aTo = -mx, bOuter = join, inward = -1 },
 		{ name = "WallShoulderEast", alongX = true, aFrom = mx, aTo = px - t, bOuter = join, inward = -1 },
-		{ name = "WallMineWest", alongX = false, aFrom = join - t, aTo = mz, bOuter = -mx, inward = 1 },
-		{ name = "WallMineEast", alongX = false, aFrom = join - t, aTo = mz, bOuter = mx, inward = -1 },
+		{ name = "WallMineWest", alongX = false, aFrom = join - t, aTo = mz, bOuter = -mx, inward = 1, footFrom = join },
+		{ name = "WallMineEast", alongX = false, aFrom = join - t, aTo = mz, bOuter = mx, inward = -1, footFrom = join },
 		{ name = "WallMineNorth", alongX = true, aFrom = -mx + t, aTo = mx - t, bOuter = mz, inward = -1 },
 	}
 
-	for index, r in runs do
-		local faceY = surface + plinthH
-		local topY = surface + height
-
-		--[[
-			Plinth. Sits where the bottom tile row would have gone, so the course
-			costs nothing in parts and no tile is left hidden behind it.
-
-			Founded a HubThickness below the surface rather than on it. The hub
-			floor is a 20-stud grass slab, and a wall starting at SurfaceY left
-			that slab's green edge showing beneath it from outside -- the wall
-			read as standing on a shelf instead of being built into the ground.
-		]]
-		course(
-			r,
-			`{r.name}Plinth`,
-			r.aFrom,
-			r.aTo,
-			t + GameConfig.WallProud,
-			surface - GameConfig.HubThickness,
-			faceY,
-			trim,
-			Enum.Material.SmoothPlastic
-		)
-
-		--[[
-			Face and pilasters share one column grid.
-
-			A run's length is almost never a whole multiple of WallTileSize, so
-			stepping by a fixed pitch left every run but one ending in a 6-12 stud
-			sliver -- a visible break in the checker at eight corners. Instead the
-			remainder is spread across the run: pick the nearest whole number of
-			columns and divide, so every tile in a run is identical and the pitch
-			varies by a stud or so between runs, which nothing can see.
-
-			Pilasters then take whole columns rather than a fixed 12 studs. Off
-			the grid they cut tiles in half and leave slivers of checker down
-			their sides; on it they replace a column cleanly, and the five face
-			tiles they would have hidden are never built.
-		]]
+	for _, r in runs do
 		local length = r.aTo - r.aFrom
 		local columns = math.max(1, math.round(length / pitch))
 		local step = length / columns
 
-		-- Pilaster columns, including the first and last so every corner gets one
-		-- from each of the two runs meeting there.
-		local pilasters = {}
-		local pilCount = math.max(2, math.round(length / GameConfig.WallPilasterSpacing) + 1)
-		if columns >= pilCount then
-			for i = 0, pilCount - 1 do
-				pilasters[math.round((columns - 1) * i / (pilCount - 1))] = true
+		--[[
+			Footing. The hub floor is a HubThickness-deep green slab, so from outside
+			the map its edge shows beneath the wall. This skirt covers it.
+
+			It sits *outside* the rim rather than on it. Laid on the rim it occupied
+			exactly the same volume as the floor tiles underneath -- 84 of them per
+			run, tops coplanar at SurfaceY -- and the z-fight painted a tan strip
+			along the base of every wall from the inside. Outside the rim it
+			overlaps nothing and still hides the edge.
+		]]
+		do
+			local skirt = GameConfig.WallFootingDepth
+			local bC = r.bOuter - r.inward * skirt * 0.5
+			-- footFrom trims the skirt where a run does not border the void: the
+			-- stem's jambs continue south of the gateway, and along that stretch
+			-- they stand on plot-band floor with no edge to hide.
+			local from = r.footFrom or r.aFrom
+			local aC, aS = (from + r.aTo) * 0.5, r.aTo - from
+			local yC = surface - GameConfig.HubThickness * 0.5
+			local colour = quantize(dirt, shades[1])
+			if r.alongX then
+				box(`{r.name}Footing`, aC, yC, bC, aS, GameConfig.HubThickness, skirt, colour, Enum.Material.SmoothPlastic)
+			else
+				box(`{r.name}Footing`, bC, yC, aC, skirt, GameConfig.HubThickness, aS, colour, Enum.Material.SmoothPlastic)
 			end
 		end
-
 		for column = 0, columns - 1 do
 			local a0 = r.aFrom + column * step
-			local a1 = a0 + step
 
-			if pilasters[column] then
+			for row = 0, rows - 1 do
 				course(
 					r,
-					`{r.name}Pilaster`,
+					r.name,
 					a0,
-					a1,
-					t + GameConfig.WallPilasterProud,
-					surface,
-					topY + stringH,
-					trim,
+					a0 + step,
+					t,
+					surface + row * pitch,
+					surface + (row + 1) * pitch,
+					quantize(dirt, shades[(column + row) % 2 + 1]),
 					Enum.Material.SmoothPlastic
 				)
-			else
-				for row = 0, rows - 1 do
-					local relief = (shadeOf(column, row, index) % 3) * 0.5 * GameConfig.WallRelief
-					course(
-						r,
-						r.name,
-						a0,
-						a1,
-						t + relief,
-						faceY + row * pitch,
-						faceY + (row + 1) * pitch,
-						quantize(dirt, shades[(column + row) % 2 + 1]),
-						Enum.Material.SmoothPlastic
-					)
-				end
 			end
 		end
 
-		-- String course, then the coping oversailing both faces.
-		course(r, `{r.name}String`, r.aFrom, r.aTo, t + GameConfig.WallProud * 0.75, topY, topY + stringH, trim, Enum.Material.SmoothPlastic)
-
+		--[[
+			Coping, oversailing both faces -- and both ends. The end oversail is what
+			closes the corners: a cap that stopped at its run's end left the square
+			where two runs meet covered by neither, a notch with the cap's green end
+			face showing through it. Extending every cap by the overhang makes the
+			two caps at a corner overlap instead, which costs nothing to look at.
+		]]
 		local over = GameConfig.WallCapOverhang
-		local capDepth = t + over * 2
-		local aC, aS = (r.aFrom + r.aTo) * 0.5, length
+		local aC, aS = (r.aFrom + r.aTo) * 0.5, length + over * 2
 		local bC = r.bOuter + r.inward * (t * 0.5)
-		local yC = topY + stringH + capH * 0.5
+		local yC = surface + height + capH * 0.5
 		if r.alongX then
-			box(`{r.name}Cap`, aC, yC, bC, aS, capH, capDepth, grass, Enum.Material.LeafyGrass)
+			box(`{r.name}Cap`, aC, yC, bC, aS, capH, t + over * 2, grass, Enum.Material.SmoothPlastic)
 		else
-			box(`{r.name}Cap`, bC, yC, aC, capDepth, capH, aS, grass, Enum.Material.LeafyGrass)
+			box(`{r.name}Cap`, bC, yC, aC, t + over * 2, capH, aS, grass, Enum.Material.SmoothPlastic)
 		end
 	end
 
@@ -1253,68 +1071,302 @@ local function buildWall()
 end
 
 --[[
-	The path: a spine from the plot row north to the spawn pad, and a cross bar
-	along the front of the plots feeding into it.
+	The plaza: the paved square the four bases face into, running from their
+	kerbs up to the shaft lip.
 
-	Raised PathRaise above the lawn rather than laid flush. Two coplanar faces
-	z-fight, and the alternative -- cutting the grass tiles around the path --
-	would make the lawn's tiling depend on where the path happens to run.
+	Bounds are derived, not written down. North is the shaft lip; south is the
+	outer face of the back pair's kerbs; east and west are the outer faces of the
+	turned pair's. Moving a plot therefore moves the plaza with it, instead of
+	quietly opening a strip of lawn between a base and the square it is supposed
+	to open onto.
 ]]
-local function buildPath()
-	local pitch = GameConfig.PathTileSize
-	-- Muted on purpose: cartoonify multiplies saturation by 1.45, and a base
-	-- picked to look like dirt on its own comes out of that as bright orange
-	-- against the grass.
-	local dirt = cartoonify(Color3.fromRGB(146, 124, 98))
+local function plazaBounds(): (number, number, number, number)
+	local shaftHalf = (RADIUS + 0.5) * BLOCK
+
+	-- Distance from a plot's centre to the outer face of its kerb, along the
+	-- axis it faces. The turned plots face along X and the back pair along Z,
+	-- but the measurement is the same either way.
+	local toKerb = GameConfig.PlotDepth / 2 + GameConfig.PlotKerbDepth
+
+	local halfX = math.abs(GameConfig.PlotLayout[1].position.X) - toKerb
+	local minZ = GameConfig.PlotLayout[2].position.Z + GameConfig.PlotDepth / 2 + GameConfig.PlotKerbDepth
+	local maxZ = GameConfig.ShaftCenterZ - shaftHalf
+
+	return -halfX, halfX, minZ, maxZ
+end
+
+--[[
+	Paves it. One rectangle, divided evenly in both axes -- stepping a fixed
+	pitch and clamping the last row would leave a sliver course down two edges,
+	which is the defect the hub floor, the wall and the old path each shipped.
+
+	The outermost course is a shade darker, so the square reads as a square from
+	inside it rather than as paving that happens to stop.
+
+	The spawn pad is left standing on top rather than cut around. It is a stud
+	proud and pale sandstone on grey paving, so it still reads as the landmark it
+	is, and a hole would break the checker at four seams for nothing.
+]]
+local function buildPlaza(): number
+	local minX, maxX, minZ, maxZ = plazaBounds()
+	local pitch = GameConfig.PlazaTileSize
+	local stone = GameConfig.PlazaColor
+	local shades = GameConfig.PlazaCheckerShades
+	local y = GameConfig.SurfaceY + GameConfig.PlazaRaise - 0.5
+
+	local sizeX, sizeZ = maxX - minX, maxZ - minZ
+	local cols = math.max(1, math.round(sizeX / pitch))
+	local rows = math.max(1, math.round(sizeZ / pitch))
+	local stepX, stepZ = sizeX / cols, sizeZ / rows
 	local built = 0
 
-	-- Divided into equal pavers rather than stepped and clamped, for the same
-	-- reason the lawn and the wall are: clamping leaves a sliver down two edges.
-	local function strip(name: string, minX: number, maxX: number, minZ: number, maxZ: number)
-		local sizeX, sizeZ = maxX - minX, maxZ - minZ
-		if sizeX <= 0 or sizeZ <= 0 then
-			return
+	for ix = 0, cols - 1 do
+		for iz = 0, rows - 1 do
+			local edge = ix == 0 or iz == 0 or ix == cols - 1 or iz == rows - 1
+			local tile = Instance.new("Part")
+			tile.Name = if edge then "PlazaKerb" else "PlazaTile"
+			tile.Anchored = true
+			tile.Locked = true
+			tile.Size = Vector3.new(stepX, 1, stepZ)
+			tile.Position = Vector3.new(minX + (ix + 0.5) * stepX, y, minZ + (iz + 0.5) * stepZ)
+			tile.Color = quantize(stone, if edge then GameConfig.PlazaBorderShade else shades[(ix + iz) % 2 + 1])
+			tile.Material = Enum.Material.SmoothPlastic
+			tile.TopSurface = Enum.SurfaceType.Smooth
+			tile.BottomSurface = Enum.SurfaceType.Smooth
+			tile.Parent = hubFolder
+			built += 1
 		end
-
-		local cols = math.max(1, math.round(sizeX / pitch))
-		local rows = math.max(1, math.round(sizeZ / pitch))
-		local stepX, stepZ = sizeX / cols, sizeZ / rows
-
-		for ix = 0, cols - 1 do
-			local x0 = minX + ix * stepX
-
-			for iz = 0, rows - 1 do
-				local z0 = minZ + iz * stepZ
-				local shade = shadeOf(math.floor(x0 / pitch), 1, math.floor(z0 / pitch))
-				local lift = (shade % 3) * 0.5 * GameConfig.PathRelief
-
-				local tile = Instance.new("Part")
-				tile.Name = name
-				tile.Anchored = true
-				tile.Locked = true
-				tile.Size = Vector3.new(stepX, 1, stepZ)
-				tile.Position = Vector3.new(
-					x0 + stepX * 0.5,
-					GameConfig.SurfaceY + GameConfig.PathRaise + lift - 0.5,
-					z0 + stepZ * 0.5
-				)
-				tile.Color = quantize(dirt, shade)
-				tile.Material = Enum.Material.Sand
-				tile.TopSurface = Enum.SurfaceType.Smooth
-				tile.BottomSurface = Enum.SurfaceType.Smooth
-				tile.Parent = hubFolder
-				built += 1
-			end
-		end
-	end
-
-	for _, rect in pathRects() do
-		strip(rect.name, rect.minX, rect.maxX, rect.minZ, rect.maxZ)
 	end
 
 	return built
 end
 
+--[[
+	Lamp standards and the centre monument.
+
+	Two rows of lamps, inset from the plaza's south and north edges. Not down the
+	middle: a file of lamps either side of the centre line would draw the path
+	back in, and the point of a square is that you cross it however you like.
+
+	The north row skips the centre column, which is the spawn pad and the walk
+	off the lip into the shaft.
+]]
+local function buildPlazaFurniture(): number
+	local minX, maxX, minZ, maxZ = plazaBounds()
+	local pal = GameConfig.PlazaPalette
+	local inset = GameConfig.PlazaLampInset
+	local built = 0
+
+	local function box(name, size, cf, colour, material)
+		local part = Instance.new("Part")
+		part.Name = name
+		part.Anchored = true
+		part.Locked = true
+		part.Size = size
+		part.CFrame = cf
+		part.Color = colour
+		part.Material = material or Enum.Material.SmoothPlastic
+		part.TopSurface = Enum.SurfaceType.Smooth
+		part.BottomSurface = Enum.SurfaceType.Smooth
+		part.Parent = hubFolder
+		built += 1
+		return part
+	end
+
+	--[[
+		One lamp. The base is sunk half below SurfaceY: it stands on paving whose
+		top is only PlazaRaise proud, and a base sitting exactly on the lawn plane
+		underneath would put two horizontal faces in the same place.
+	]]
+	local function lamp(x: number, z: number)
+		local h = GameConfig.PlazaLampHeight
+		box("PlazaLampBase", Vector3.new(3.6, 2, 3.6), CFrame.new(x, 0.4, z), pal.stone)
+		box("PlazaLampPost", Vector3.new(1.4, h, 1.4), CFrame.new(x, h / 2 + 1.2, z), pal.post)
+		box("PlazaLampGlass", Vector3.new(3, 3, 3), CFrame.new(x, h + 1.6, z), pal.lamp, Enum.Material.Neon)
+		box("PlazaLampCap", Vector3.new(4.2, 1, 4.2), CFrame.new(x, h + 3.6, z), pal.post)
+	end
+
+	local perRow = GameConfig.PlazaLampsPerRow
+	local spanX = (maxX - inset) - (minX + inset)
+	for i = 1, perRow do
+		local x = (minX + inset) + (i - 1) * (spanX / (perRow - 1))
+		lamp(x, minZ + inset)
+		-- Skip the middle of the north row: that column is the spawn pad and the
+		-- walk off the lip.
+		if i ~= math.ceil(perRow / 2) then
+			lamp(x, maxZ - inset)
+		end
+	end
+
+	--[[
+		Centre monument: a stepped plinth under the same crossed hammers the plot
+		headers carry, so the square and the buildings around it are plainly the
+		same place. Blocks, not a mesh -- this project ships no asset ids.
+	]]
+	local cx = (minX + maxX) / 2
+	local cz = (minZ + maxZ) / 2
+	local steps = GameConfig.PlazaMonumentSteps
+	local baseW = GameConfig.PlazaMonumentBase
+	local top = 0
+
+	for i = 1, steps do
+		local w = baseW * (1 - (i - 1) / (steps + 1))
+		local h = 1.8
+		box("MonumentStep", Vector3.new(w, h, w), CFrame.new(cx, top + h / 2, cz), pal.stone)
+		top += h
+	end
+
+	local pillarH = 9
+	box("MonumentPillar", Vector3.new(5, pillarH, 5), CFrame.new(cx, top + pillarH / 2, cz), pal.post)
+	top += pillarH
+
+	for _, tilt in { 34, -34 } do
+		local hammer = CFrame.new(cx, top + 5, cz) * CFrame.Angles(0, 0, math.rad(tilt))
+		box("MonumentHammerHandle", Vector3.new(1.5, 10, 1.5), hammer, pal.emblem)
+		box("MonumentHammerHead", Vector3.new(4.6, 3, 2), hammer * CFrame.new(0, 4.2, 0), pal.emblem)
+	end
+
+	return built
+end
+
+--[[
+	The two shops, built to the reference: a striped market stall for selling,
+	and a glowing mystery cabinet for the ore-to-brainrot conversion.
+
+	Scenery. RequestSell and RequestConvert already exist and are driven from
+	the UI, so these give those flows somewhere to live in the world rather than
+	a second way to fire them. Wiring a ProximityPrompt to either is a few lines
+	in the owning service, but it is a gameplay decision, not a set-dressing one.
+]]
+local function buildShops()
+	local pal = GameConfig.ShopPalette
+	local built = 0
+
+	local function box(name, size, cf, colour, material)
+		local part = Instance.new("Part")
+		part.Name = name
+		part.Anchored = true
+		part.Locked = true
+		part.Size = size
+		part.CFrame = cf
+		part.Color = colour
+		part.Material = material or Enum.Material.SmoothPlastic
+		part.TopSurface = Enum.SurfaceType.Smooth
+		part.BottomSurface = Enum.SurfaceType.Smooth
+		part.Parent = hubFolder
+		built += 1
+		return part
+	end
+
+	-- The lit circle each shop stands on, as in the reference.
+	local function standingPad(centre)
+		local pad = box(
+			"ShopPad",
+			Vector3.new(0.4, 22, 22),
+			CFrame.new(centre + Vector3.new(0, 0.12, 0)) * CFrame.Angles(0, 0, math.rad(90)),
+			pal.pad,
+			Enum.Material.Neon
+		)
+		pad.Shape = Enum.PartType.Cylinder
+		pad.CanCollide = false
+	end
+
+	--------------------------------------------------------------------
+	-- Sell stall
+	--------------------------------------------------------------------
+	local s = GameConfig.ShopStallPosition
+	standingPad(s)
+
+	local stallW, stallD, postH = 26, 17, 13
+	for _, sx in { -1, 1 } do
+		for _, sz in { -1, 1 } do
+			box(
+				"StallPost",
+				Vector3.new(2.4, postH, 2.4),
+				CFrame.new(s + Vector3.new(sx * (stallW / 2 - 1), postH / 2, sz * (stallD / 2 - 1))),
+				pal.post
+			)
+		end
+	end
+
+	-- Awning, as alternating stripes across the width.
+	local stripes = 8
+	for i = 0, stripes - 1 do
+		local w = stallW / stripes
+		box(
+			"StallAwning",
+			Vector3.new(w, 3.2, stallD + 3),
+			CFrame.new(s + Vector3.new(-stallW / 2 + (i + 0.5) * w, postH + 1.2, 0)),
+			(i % 2 == 0) and pal.stripeA or pal.stripeB
+		)
+	end
+
+	-- Counter on the south side, which is the way a player crosses the plaza
+	-- from the back pair of bases.
+	box("StallCounter", Vector3.new(stallW - 3, 2, 5), CFrame.new(s + Vector3.new(0, 6.2, -stallD / 2 + 3)), pal.wood)
+	box("StallCounterLeg", Vector3.new(stallW - 6, 5.2, 2.4), CFrame.new(s + Vector3.new(0, 2.6, -stallD / 2 + 3)), pal.wood)
+
+	local sellAnchor = box("SellLabel", Vector3.new(1, 1, 1), CFrame.new(s + Vector3.new(0, postH + 7, 0)), pal.stripeA)
+	sellAnchor.Transparency = 1
+	sellAnchor.CanCollide = false
+
+	local sellGui = Instance.new("BillboardGui")
+	sellGui.Size = UDim2.fromOffset(190, 70)
+	sellGui.AlwaysOnTop = false
+	sellGui.MaxDistance = 260
+	sellGui.Parent = sellAnchor
+
+	local sellText = Instance.new("TextLabel")
+	sellText.Size = UDim2.fromScale(1, 1)
+	sellText.BackgroundTransparency = 1
+	sellText.Font = Enum.Font.GothamBlack
+	sellText.TextScaled = true
+	sellText.Text = "SELL"
+	sellText.TextColor3 = pal.stripeA
+	sellText.TextStrokeTransparency = 0.2
+	sellText.Parent = sellGui
+
+	--------------------------------------------------------------------
+	-- Conversion cabinet
+	--------------------------------------------------------------------
+	local c = GameConfig.ShopConverterPosition
+	standingPad(c)
+
+	box("ConverterBase", Vector3.new(18, 2.5, 13), CFrame.new(c + Vector3.new(0, 1.25, 0)), pal.machineBody)
+	box("ConverterBody", Vector3.new(15, 17, 10), CFrame.new(c + Vector3.new(0, 11, 0)), pal.machineBody)
+	box("ConverterTrim", Vector3.new(16.5, 3, 11), CFrame.new(c + Vector3.new(0, 20.5, 0)), pal.machineTrim)
+
+	-- Screen faces west, onto the walk.
+	box("ConverterFrame", Vector3.new(1, 12, 12), CFrame.new(c + Vector3.new(-7.6, 12, 0)), pal.machineTrim)
+	local screen = box(
+		"ConverterScreen",
+		Vector3.new(0.6, 9, 9),
+		CFrame.new(c + Vector3.new(-8.3, 12, 0)),
+		pal.machineGlow,
+		Enum.Material.Neon
+	)
+
+	local screenGui = Instance.new("SurfaceGui")
+	screenGui.Face = Enum.NormalId.Left
+	screenGui.CanvasSize = Vector2.new(220, 220)
+	screenGui.LightInfluence = 0
+	screenGui.Parent = screen
+
+	local mark = Instance.new("TextLabel")
+	mark.Size = UDim2.fromScale(1, 1)
+	mark.BackgroundTransparency = 1
+	mark.Font = Enum.Font.GothamBlack
+	mark.TextScaled = true
+	mark.Text = "?"
+	mark.TextColor3 = Color3.fromRGB(255, 255, 255)
+	mark.Parent = screenGui
+
+	for _, sx in { -1, 1 } do
+		box("ConverterPipe", Vector3.new(1.2, 7, 1.2), CFrame.new(c + Vector3.new(sx * 5, 25, -2)), pal.post)
+	end
+
+	return built
+end
 --[[
 	Roblox picks at random among enabled SpawnLocations, so a place that ships
 	with the stock one at the origin will drop half its players ~50 studs from
@@ -1347,7 +1399,7 @@ end
 -- ==========================================================================
 
 --[[
-	Builds the surface -- hub floor, path, retaining wall and the empty plot
+	Builds the surface -- hub floor, retaining wall and the empty plot
 	shells -- into Workspace without running the game, so it can be looked at
 	and adjusted in Edit mode. From the command bar:
 
@@ -1382,7 +1434,7 @@ function MineService.buildPreview(): string
 	folder.Name = PREVIEW_NAME
 
 	--[[
-		buildHub/buildPath/buildWall all parent into the hubFolder upvalue, so
+		buildHub and buildWall both parent into the hubFolder upvalue, so
 		point that at the preview folder for the duration rather than copying
 		their bodies -- a copy is a second definition of the surface, and the two
 		would drift the first time either was touched.
@@ -1392,8 +1444,10 @@ function MineService.buildPreview(): string
 
 	local ok, err = pcall(function()
 		buildHub()
-		buildPath()
 		buildWall()
+		buildPlaza()
+		buildPlazaFurniture()
+		buildShops()
 	end)
 
 	hubFolder = previous
@@ -1524,8 +1578,10 @@ function MineService.Start()
 	MineService.clearPreview()
 
 	buildHub()
-	buildPath()
 	buildWall()
+	buildPlaza()
+	buildPlazaFurniture()
+	buildShops()
 	hubFolder.Parent = Workspace
 	mineFolder.Parent = Workspace
 	claimSpawns()
