@@ -41,25 +41,8 @@ function RebirthFrame.new(parent: Instance): RebirthFrame
 	outer.Parent = parent
 	self.instance = outer
 
-	local header = Instance.new("Frame")
-	header.BackgroundColor3 = Theme.COLOR.panelRaised
-	header.BorderSizePixel = 0
-	header.Size = UDim2.new(1, 0, 0, Theme.METRIC.headerHeight)
+	local header, close = Theme.header("Rebirth", { accent = Theme.COLOR.coins })
 	header.Parent = inner
-
-	local title = Theme.label("REBIRTH", {
-		Font = Theme.FONT.heading,
-		TextSize = Theme.TEXT_SIZE.heading,
-		Size = UDim2.new(1, -Theme.METRIC.tapTarget, 1, 0),
-		Position = UDim2.fromOffset(Theme.METRIC.pad, 0),
-	})
-	title.Parent = header
-
-	local close = Theme.button("X", {
-		Size = UDim2.fromOffset(Theme.METRIC.tapTarget, Theme.METRIC.headerHeight),
-		Position = UDim2.new(1, -Theme.METRIC.tapTarget, 0, 0),
-	})
-	close.Parent = header
 	close.Activated:Connect(function()
 		self:setVisible(false)
 	end)
@@ -121,7 +104,11 @@ function RebirthFrame.new(parent: Instance): RebirthFrame
 	)
 	kept.Parent = body
 
+	-- Armed is expressed as the button's Selected state so it survives a hover;
+	-- assigning BackgroundColor3 directly does not, because Theme.button
+	-- reassigns both colours every time the pointer crosses it.
 	self._button = Theme.button("REBIRTH", {
+		activeColour = Theme.COLOR.danger,
 		Size = UDim2.new(1, -Theme.METRIC.pad * 2, 0, Theme.METRIC.tapTarget),
 		Position = UDim2.new(0, Theme.METRIC.pad, 1, -(Theme.METRIC.tapTarget + 4)),
 	})
@@ -138,11 +125,11 @@ function RebirthFrame.new(parent: Instance): RebirthFrame
 		if not self._armed then
 			self._armed = true
 			self._button.Text = "CONFIRM -- THIS CANNOT BE UNDONE"
-			self._button.BackgroundColor3 = Theme.COLOR.danger
+			self._button:SetAttribute("Selected", true)
 			return
 		end
 
-		self._armed = false
+		self:_disarm()
 		for _, cb in self._callbacks do
 			cb()
 		end
@@ -155,10 +142,17 @@ function RebirthFrame:onRebirth(cb: () -> ())
 	table.insert(self._callbacks, cb)
 end
 
+-- Clears the armed state and the red it is shown in. The two have to move
+-- together, so nothing sets `_armed` directly.
+function RebirthFrame:_disarm()
+	self._armed = false
+	self._button:SetAttribute("Selected", false)
+end
+
 function RebirthFrame:update(snapshot: ProfileSnapshot?)
 	-- Any state change disarms: the numbers the player confirmed against may
 	-- no longer hold.
-	self._armed = false
+	self:_disarm()
 
 	if not snapshot then
 		return
@@ -182,13 +176,12 @@ function RebirthFrame:update(snapshot: ProfileSnapshot?)
 	self._button.Text = if affordable
 		then "REBIRTH"
 		else "NEED $" .. Format.abbreviate(cost - snapshot.coins) .. " MORE"
-	self._button.BackgroundColor3 = if affordable then Theme.COLOR.buttonIdle else Theme.COLOR.buttonDisabled
 end
 
 function RebirthFrame:setVisible(visible: boolean)
 	self.instance.Visible = visible
 	if not visible then
-		self._armed = false
+		self:_disarm()
 	end
 end
 

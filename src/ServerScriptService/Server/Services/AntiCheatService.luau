@@ -49,6 +49,11 @@ local POLICY: { [string]: { limit: number, window: number } } = {
 	RequestEquip = { limit = 8, window = 1 },
 	RequestUnlockLayer = { limit = 4, window = 1 },
 	RequestRebirth = { limit = 2, window = 2 },
+	-- A ride back up is free and harmless, but it moves a character, so it is
+	-- kept tighter than the shop remotes.
+	RequestSurfaceTeleport = { limit = 2, window = 3 },
+	-- Succeeds once a day; anything faster than this is a script.
+	RequestClaimDaily = { limit = 2, window = 2 },
 	RequestConvert = { limit = 4, window = 1 },
 	RequestPlace = { limit = 8, window = 1 },
 	RequestUnplace = { limit = 8, window = 1 },

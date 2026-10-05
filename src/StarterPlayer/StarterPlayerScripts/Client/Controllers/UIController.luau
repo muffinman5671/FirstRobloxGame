@@ -12,11 +12,15 @@
 	E along with the rarity reveal; the remote it will listen to already exists.
 ]]
 
+local CollectionService = game:GetService("CollectionService")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 
 local ConvertFrame = require(script.Parent.Parent.UI.ConvertFrame)
+local DailyFrame = require(script.Parent.Parent.UI.DailyFrame)
+local DailyReward = require(ReplicatedStorage.Shared.Modules.DailyReward)
+local GameConfig = require(ReplicatedStorage.Shared.Config.GameConfig)
 local HUD = require(script.Parent.Parent.UI.HUD)
 local IndexFrame = require(script.Parent.Parent.UI.IndexFrame)
 local InventoryFrame = require(script.Parent.Parent.UI.InventoryFrame)
@@ -38,7 +42,7 @@ local trove = Trove.new()
 
 local snapshot: ProfileSnapshot? = nil
 local screen: ScreenGui
-local hud, inventory, shop, convert, index, rebirth
+local hud, inventory, shop, convert, index, rebirth, daily
 
 -- Human-readable text for the refusal reasons the server sends back. An
 -- unmapped reason falls through to the raw string rather than being swallowed,
@@ -68,6 +72,9 @@ local REASON_TEXT: { [string]: string } = {
 	unknown_layer = "That layer doesn't exist",
 	bad_request = "Something went wrong",
 	bad_layer = "Something went wrong",
+	not_at_sell_shop = "Sell your ore at the SELL stall",
+	no_character = "Respawning -- try again",
+	daily_already_claimed = "Already claimed today",
 }
 
 -- Notifications belong to NotifyController; this is just a shorthand.
@@ -84,6 +91,7 @@ local function render()
 	convert:update(snapshot)
 	index:update(snapshot)
 	rebirth:update(snapshot)
+	daily:update(snapshot)
 end
 
 local function setSnapshot(next: ProfileSnapshot?)
@@ -161,6 +169,7 @@ function UIController.Init()
 	convert = ConvertFrame.new(screen)
 	index = IndexFrame.new(screen)
 	rebirth = RebirthFrame.new(screen)
+	daily = DailyFrame.new(screen)
 end
 
 function UIController.Start()
@@ -173,14 +182,127 @@ function UIController.Start()
 		convert = convert,
 		index = index,
 		rebirth = rebirth,
+		daily = daily,
 	}
 
-	hud:onOpen(function(which)
+	-- `nil` closes everything.
+	local function showOnly(which: string?)
+		-- Panels are drawn when a snapshot arrives, not when they open, and
+		-- mining changes ore counts without sending one. Redraw the panel being
+		-- opened so it shows this trip's ore rather than the last snapshot's.
+		local opening = if which then panels[which] else nil
+		if opening and snapshot then
+			opening:update(snapshot)
+		end
+
+		for name, panel in panels do
+			panel:setVisible(name == which)
+		end
+	end
+
+	-- What a HUD button does: opening the one already open closes it.
+	hud:onOpen(function(which: string)
 		local target = panels[which]
 		local opening = target ~= nil and not target.instance.Visible
-		for name, panel in panels do
-			panel:setVisible(opening and name == which)
+		showOnly(opening and which or nil)
+	end)
+
+	--[[
+		Walk-in shops.
+
+		Each shop's lit circle (MineService's `standingPad`) carries a `UIPanel`
+		attribute and a tag; stepping into one opens that panel and stepping out
+		closes it again. The pads are read by tag rather than by name or position,
+		so a new shop needs no change here.
+
+		Polled rather than driven by `Touched`. Touched misses a fast entry, fires
+		repeatedly while you stand still, and never tells you cleanly that you
+		left -- all three matter when the event is "the menu is open".
+
+		Edge-triggered on purpose: `wasInside` means closing the panel while still
+		standing on the pad leaves it closed rather than having it reopen on the
+		next frame.
+	]]
+	local wasInside: { [BasePart]: boolean } = {}
+	local since = 0
+
+	local function padCheck()
+		local character = player.Character
+		local root = character and character:FindFirstChild("HumanoidRootPart") :: BasePart?
+
+		if not root then
+			-- Respawning: forget where we were, or the pad we died on stays
+			-- "entered" and never fires again.
+			table.clear(wasInside)
+			inventory:setSellable(false)
+			return
 		end
+
+		--[[
+			Whether the Sell buttons are live is decided here rather than in the
+			frame, off the same circle and the same test that opens the panel --
+			so the buttons can never be lit while the player is off the pad the
+			server is measuring against.
+
+			Read by ShopKey, not by which panel the pad opens: the sell stall
+			opens the Backpack, and so does the HUD button.
+		]]
+		local atSellStall = false
+
+		for _, pad in CollectionService:GetTagged(GameConfig.PanelPadTag) do
+			if not pad:IsA("BasePart") then
+				continue
+			end
+
+			local which = pad:GetAttribute("UIPanel")
+			-- The pad is a cylinder laid flat, so its diameter is Size.Y/Size.Z
+			-- and Size.X is the thickness. Read from the part so the trigger is
+			-- always exactly the circle being drawn.
+			local radius = math.max(pad.Size.Y, pad.Size.Z) / 2
+			local offset = root.Position - pad.Position
+
+			-- Horizontal distance, with a height band so a player in the shaft
+			-- directly below a pad does not trip it.
+			local inside = Vector2.new(offset.X, offset.Z).Magnitude <= radius and math.abs(offset.Y) <= 12
+
+			if inside and pad:GetAttribute(GameConfig.ShopKeyAttribute) == "sell" then
+				atSellStall = true
+			end
+
+			if inside and not wasInside[pad] then
+				wasInside[pad] = true
+				if typeof(which) == "string" then
+					showOnly(which)
+				end
+			elseif not inside and wasInside[pad] then
+				wasInside[pad] = nil
+				-- Only close our own panel: the player may have opened something
+				-- else from the HUD while standing here.
+				local target = typeof(which) == "string" and panels[which]
+				if target and target.instance.Visible then
+					showOnly(nil)
+				end
+			end
+		end
+
+		inventory:setSellable(atSellStall)
+	end
+
+	trove:Connect(RunService.Heartbeat, function(delta: number)
+		since += delta
+		if since < 0.1 then
+			return
+		end
+		since = 0
+		padCheck()
+	end)
+
+	hud:onSurface(function()
+		request("RequestSurfaceTeleport")
+	end)
+
+	daily:onClaim(function()
+		request("RequestClaimDaily")
 	end)
 
 	rebirth:onRebirth(function()
@@ -222,9 +344,35 @@ function UIController.Start()
 		request("RequestUnlockLayer", layerIndex)
 	end)
 
+	--[[
+		The Daily screen opens itself once, on the first snapshot of the session,
+		if a reward is waiting. Once only: a reward that opens at midnight while
+		someone is halfway down the shaft should light the dot on the HUD button,
+		not put a panel over what they are doing. And never over a panel that is
+		already open.
+	]]
+	local offeredDaily = false
+	local function offerDaily()
+		if offeredDaily or not snapshot then
+			return
+		end
+		offeredDaily = true
+
+		if not DailyReward.status(snapshot.dailyLastClaimDay, snapshot.dailyStreak, os.time()).claimable then
+			return
+		end
+		for _, panel in panels do
+			if panel.instance.Visible then
+				return
+			end
+		end
+		showOnly("daily")
+	end
+
 	-- Server-pushed state.
 	trove:Connect(RemoteRegistry.event("ProfileUpdated").OnClientEvent, function(next: ProfileSnapshot)
 		setSnapshot(next)
+		offerDaily()
 	end)
 
 	trove:Connect(RemoteRegistry.event("CoinsChanged").OnClientEvent, function(total: number)
@@ -255,13 +403,33 @@ function UIController.Start()
 		end
 	end)
 
-	trove:Connect(RemoteRegistry.event("OreCredited").OnClientEvent, function()
-		-- Cheap local refresh; the authoritative snapshot follows on sale or
-		-- purchase. Mining fires this constantly, so it must not hit a remote.
-		if snapshot then
+	trove:Connect(
+		RemoteRegistry.event("OreCredited").OnClientEvent,
+		function(oreId: string, _credited: number, newTotal: number)
+			--[[
+				Cheap local refresh; the authoritative snapshot follows on sale or
+				purchase. Mining fires this constantly, so it must not hit a remote.
+
+				The event carries the ore's new count, and that has to go into the
+				snapshot before anything is redrawn. Redrawing the old snapshot is
+				what left the backpack meter frozen for a whole trip, and the Bag
+				reading "NOTHING TO SELL" at the stall with a full backpack.
+			]]
+			if not snapshot then
+				return
+			end
+			if type(oreId) == "string" and type(newTotal) == "number" then
+				snapshot.oreCounts[oreId] = newTotal
+			end
+
 			hud:update(snapshot)
+			-- The Bag can be open while mining. Closed panels are redrawn by
+			-- showOnly when they open.
+			if inventory.instance.Visible then
+				inventory:update(snapshot)
+			end
 		end
-	end)
+	)
 
 	trove:Connect(RunService.RenderStepped, function()
 		hud:updateDepth()
@@ -276,6 +444,7 @@ function UIController.Start()
 			end)
 			if ok and result then
 				setSnapshot(result)
+				offerDaily()
 				return
 			end
 			task.wait(0.5)

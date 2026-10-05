@@ -113,32 +113,46 @@ asserts.
 
 | # | Pickaxe | Power | Swings/s | Reach | Price |
 | --- | --- | --- | --- | --- | --- |
-| 1 | Cracked Trowel | 3 | 1.6 | 18 | free |
-| 2 | Tin Pick | 4.35 | 1.68 | 18.6 | 500 |
-| 3 | Iron Pick | 6.31 | 1.77 | 19.3 | 780 |
-| 4 | Steel Pick | 9.15 | 1.85 | 19.9 | 1,200 |
-| 5 | Tungsten Pick | 13.26 | 1.94 | 20.5 | 1,900 |
-| 6 | Obsidian Pick | 19.23 | 2.02 | 21.2 | 2,900 |
-| 7 | Quartz Pick | 27.88 | 2.11 | 21.8 | 4,500 |
-| 8 | Cobalt Pick | 40.43 | 2.19 | 22.4 | 6,900 |
-| 9 | Titanium Pick | 58.62 | 2.27 | 23.1 | 11,000 |
-| 10 | Plasma Pick | 85 | 2.36 | 23.7 | 17,000 |
-| 11 | Meteor Pick | 123.25 | 2.44 | 24.3 | 26,000 |
-| 12 | Prism Pick | 178.72 | 2.53 | 24.9 | 40,000 |
-| 13 | Voltaic Pick | 259.14 | 2.61 | 25.6 | 62,000 |
-| 14 | Magma Pick | 375.76 | 2.69 | 26.2 | 96,000 |
-| 15 | Abyssal Pick | 544.85 | 2.78 | 26.8 | 150,000 |
-| 16 | Chrono Pick | 790.03 | 2.86 | 27.5 | 230,000 |
-| 17 | Nebula Pick | 1,145.54 | 2.95 | 28.1 | 360,000 |
-| 18 | Singularity Pick | 1,661.03 | 3.03 | 28.7 | 550,000 |
-| 19 | Paradox Pick | 2,408.49 | 3.12 | 29.4 | 860,000 |
-| 20 | Static Breaker | 3,492.31 | 3.2 | 30 | 1,300,000 |
+| 1 | Cracked Trowel | 3 | 2.5 | 18 | free |
+| 2 | Tin Pick | 4.35 | 2.63 | 18.6 | 500 |
+| 3 | Iron Pick | 6.31 | 2.76 | 19.3 | 780 |
+| 4 | Steel Pick | 9.15 | 2.89 | 19.9 | 1,200 |
+| 5 | Tungsten Pick | 13.26 | 3.03 | 20.5 | 1,900 |
+| 6 | Obsidian Pick | 19.23 | 3.16 | 21.2 | 2,900 |
+| 7 | Quartz Pick | 27.88 | 3.29 | 21.8 | 4,500 |
+| 8 | Cobalt Pick | 40.43 | 3.42 | 22.4 | 6,900 |
+| 9 | Titanium Pick | 58.62 | 3.55 | 23.1 | 11,000 |
+| 10 | Plasma Pick | 85 | 3.68 | 23.7 | 17,000 |
+| 11 | Meteor Pick | 123.25 | 3.82 | 24.3 | 26,000 |
+| 12 | Prism Pick | 178.72 | 3.95 | 24.9 | 40,000 |
+| 13 | Voltaic Pick | 259.14 | 4.08 | 25.6 | 62,000 |
+| 14 | Magma Pick | 375.76 | 4.21 | 26.2 | 96,000 |
+| 15 | Abyssal Pick | 544.85 | 4.34 | 26.8 | 150,000 |
+| 16 | Chrono Pick | 790.03 | 4.47 | 27.5 | 230,000 |
+| 17 | Nebula Pick | 1,145.54 | 4.61 | 28.1 | 360,000 |
+| 18 | Singularity Pick | 1,661.03 | 4.74 | 28.7 | 550,000 |
+| 19 | Paradox Pick | 2,408.49 | 4.87 | 29.4 | 860,000 |
+| 20 | Static Breaker | 3,492.31 | 5 | 30 | 1,300,000 |
 
 Swing speed and reach interpolate linearly rather than geometrically — they are
 feel knobs, not power knobs, so they stay off the cost curve.
 
-Damage per second at tier 20 is ~11,175. The toughest block in the game
-(Mythic ore, hardness 8, in The Static) has 41,600 HP — about 3.7 seconds.
+Damage per second at tier 20 is ~17,460 before crits, ~19,200 with them. The
+toughest block in the game (Mythic ore, hardness 8, in The Static) has 41,600
+HP — about 2.4 seconds, or 2.2 with crits.
+
+### Critical hits
+
+Each swing has a **10%** chance to crit for **2×** damage, rolled on the server.
+Expected damage is 10% above the Power column.
+
+### Ore per block
+
+Every broken block pays **exactly 1** unit. It was 1–2 while the starter
+pickaxe swung 1.6 times a second; swing speed then went up by half (1.6 → 2.5 at
+tier 1, 3.2 → 5 at tier 20), and the yield came down by the same factor so that
+ore per minute stayed where it was. Blocks break faster; the pacing in the
+Targets table below did not move with them.
 
 ---
 
@@ -208,7 +222,7 @@ Rolled independently of the character, so any character can appear at any tier.
 
 ## Podium slots
 
-4 at start, 24 maximum. Total cost to max out: **~58.9M**.
+4 at start, 10 maximum. Total cost to max out: **117,800**.
 
 | Slots owned | Cost of the next |
 | --- | --- |
@@ -218,21 +232,49 @@ Rolled independently of the character, so any character can appear at any tier.
 | 7 | 19,000 |
 | 8 | 29,000 |
 | 9 | 45,000 |
-| 10 | 69,000 |
-| 11 | 110,000 |
-| 12 | 170,000 |
-| 13 | 260,000 |
-| 14 | 400,000 |
-| 15 | 620,000 |
-| 16 | 960,000 |
-| 17 | 1,500,000 |
-| 18 | 2,300,000 |
-| 19 | 3,600,000 |
-| 20 | 5,500,000 |
-| 21 | 8,600,000 |
-| 22 | 13,000,000 |
-| 23 | 21,000,000 |
-| 24 | maxed |
+| 10 | maxed |
+
+The cap was 24 until schema 2. A profile that owned more than 10 is refunded
+for every slot above the cap at the price it paid, and anything standing on a
+podium that no longer exists is returned to storage, still owned.
+
+The four starting podiums are the stage across the back of the base. The six
+bought after that alternate left wall, right wall, from the stage toward the
+door (`GameConfig.PodiumLayout`).
+
+Capping the podiums did not slow the game down in the model. With 24 slots the
+simulated player ended on about 37,500 coins a second, and with 10 on about
+20,300 — but it reached The Static sooner (292 minutes against 317), because
+the fourteen slots it no longer buys cost 58.1M between them, and that goes on
+layer keys instead.
+
+---
+
+## Daily rewards
+
+One claim per UTC day. Consecutive days walk down the table; the day after
+day 7 is day 1 again, and missing a whole day sends the streak back to day 1.
+
+Each day pays the **larger** of a flat amount and some minutes of the player's
+passive income at the moment they claim:
+
+| Day | Flat | Or minutes of income | At 10/sec | At 1,000/sec |
+| --- | --- | --- | --- | --- |
+| 1 | 250 | 5 | 3,000 | 300,000 |
+| 2 | 500 | 8 | 4,800 | 480,000 |
+| 3 | 1,000 | 10 | 6,000 | 600,000 |
+| 4 | 2,000 | 15 | 9,000 | 900,000 |
+| 5 | 4,000 | 20 | 12,000 | 1,200,000 |
+| 6 | 7,500 | 30 | 18,000 | 1,800,000 |
+| 7 | 15,000 | 60 | 36,000 | 3,600,000 |
+
+A full week is 148 minutes of income, about 21 a day. Offline earnings can pay
+up to 120 minutes' worth for a single absence (4 hours at half rate), so the
+daily reward is always the smaller of the two. That is the intent: it is for
+coming back, and it should not outweigh what the brainrots earned while away.
+
+A new player's first reward is open the moment they join, and the model below
+assumes they take it.
 
 ---
 
@@ -262,9 +304,28 @@ Mythic ore requires 3 rebirths.
 ## Passive income
 
 Income ticks once per second at
-`sum(incomePerSecond × mutation) × rebirthMultiplier` over brainrots placed in
-**unlocked** slots. Fractional coins carry between ticks, so a 2.5/sec brainrot
-pays 5 every two seconds rather than being floored to 2 forever.
+`sum(incomePerSecond × mutation) × rebirthMultiplier × (1 + index bonus)` over
+brainrots placed in **unlocked** slots. Fractional coins carry between ticks, so
+a 2.5/sec brainrot pays 5 every two seconds rather than being floored to 2
+forever.
+
+### Index bonus
+
+The collection log pays. Each character discovered adds **+1%** to passive
+income, and finishing a whole rarity band adds that band's set bonus on top:
+
+| Band | Characters | Set bonus |
+| --- | --- | --- |
+| Common | 6 | +5% |
+| Uncommon | 6 | +8% |
+| Rare | 5 | +12% |
+| Epic | 4 | +20% |
+| Legendary | 3 | +30% |
+| Mythic | 2 | +50% |
+
+The parts add together and the total multiplies income alongside the rebirth
+multiplier. A full index is **+151%**. The bonus survives rebirth, because the
+index does. Ore discoveries are recorded in the same index but pay nothing.
 
 Offline earnings pay **50%** of the live rate, capped at **4 hours**. Leaving
 the game running is always better than not, but returning still pays.
@@ -273,31 +334,69 @@ the game running is always better than not, but returning still pays.
 
 ## Targets (§7) — measured
 
-40 seeds, generated by `Shared/Tests/BalanceModel.luau`:
+120 seeds, generated by `Shared/Tests/BalanceModel.luau`:
 
 ```lua
-print(require(game.ReplicatedStorage.Shared.Tests.BalanceModel).run({ seeds = 40 }))
+print(require(game.ReplicatedStorage.Shared.Tests.BalanceModel).run({ seeds = 120 }))
 ```
 
 | Milestone | Target | Measured (avg) | Range | Ratio |
 | --- | --- | --- | --- | --- |
-| First conversion | ~2 min | **2.0 min** | 1.0–2.9 | 0.98× |
-| Layer 2 | ~8 min | **8.7 min** | 3.2–13.3 | 1.08× |
-| First Epic+ brainrot | ~20 min | **21.3 min** | 8.7–63.9 | 1.07× |
-| First rebirth | ~60–75 min | **53.7 min** | 26.6–109.1 | 0.80× |
+| First conversion | ~2 min | **1.9 min** | 1.9–1.9 | 0.97× |
+| Layer 2 | ~8 min | **8.2 min** | 4.3–13.1 | 1.03× |
+| First Epic+ brainrot | ~20 min | **15.3 min** | 2.9–47.0 | 0.77× |
+| First rebirth | ~60–75 min | **45.3 min** | 12.7–76.5 | 0.67× |
 
-All four land within ±30% of target.
+**Three of the four land within ±30% of target. First rebirth does not:** it
+models at 0.67×, just under the band's 0.70× floor. It was 0.72× on these same
+120 seeds before the daily reward existed, and the 250 coins a new player now
+claims at minute zero are what moved it the rest of the way — they buy the
+first upgrades a trip sooner, and that compounds. Nothing was retuned to pull
+it back. `RebirthBaseCost` is the knob that moves this milestone and little
+else, if it should be.
+
+These were 40-seed figures until this measurement. At 40 seeds first Epic read
+0.69× here and 0.77× at 120 with nothing else changed, which is conversion luck
+rather than anything in the config, so the table now uses the larger sample.
 
 Past the doc's last target, where the numbers are reported rather than aimed at:
 
 | Milestone | Measured (avg) | Range | Seeds reaching it |
 | --- | --- | --- | --- |
-| Layer 4 (Crystalis) | **81.3 min** | 37.4–127.4 | 40/40 |
-| Layer 5 (Magmadeep) | **177.6 min** | 99.9–349.0 | 40/40 |
-| Layer 6 (The Static) | **391.2 min** | 247.0–482.2 | 34/40 |
+| Layer 4 (Crystalis) | **75.5 min** | 34.1–137.2 | 120/120 |
+| Layer 5 (Magmadeep) | **150.7 min** | 57.1–275.2 | 120/120 |
+| Layer 6 (The Static) | **295.0 min** | 165.1–447.3 | 116/120 |
 
-Six of forty seeds do not reach The Static inside the model's 8-hour cap. A
-complete run of the content is most of a working day.
+Four seeds in 120 do not reach The Static inside the model's 8-hour cap. A
+complete run of the content is still most of a working day.
+
+### The swing-speed change, attributed (2026-10-04)
+
+Swing speed went from 1.6–3.2 to 2.5–5 swings a second, crits and the index
+bonus were added, and ore per block came down from 1–2 to exactly 1. Same 40
+seeds each time, one change added per row:
+
+| Configuration | First conversion | Layer 2 | First Epic+ | First rebirth | Layer 6 |
+| --- | --- | --- | --- | --- | --- |
+| Before (1.6–3.2 swings/s, yield 1–2) | 2.0 | 8.7 | 21.3 | 53.7 | 391.2 |
+| Faster swings only | 1.5 | 7.1 | 12.2 | 39.9 | 301.6 |
+| + crits | 1.5 | 7.1 | 11.7 | 37.9 | 305.0 |
+| + index bonus | 1.5 | 7.1 | 11.4 | 36.7 | 262.9 |
+| + yield fixed at 1 (**shipped**) | 1.9 | 8.8 | 17.2 | 49.6 | 323.4 |
+
+Faster swings on their own put first rebirth at 0.59× of target, and with crits
+and the index bonus on top it reached 0.54× with first Epic at 0.57× — outside
+the ±30% band, and a third off the length of the game. Two ways of paying that
+back were measured. Raising `BlockBaseHp` to 17 restores the pacing (0.95×,
+1.02×, 0.99×, 0.72×) but leaves a block taking as long to break as it did
+before, which is the thing the change was for. Fixing the yield at 1 keeps
+blocks breaking about 1.5× as fast and takes the same factor out of what each
+one pays, so ore per minute is unchanged. That is the one shipped.
+
+The late game still models about 17% quicker than before. Most of that is the
+index bonus, which is small in the first hour and large by Layer 6, and it is
+intended. The two Layer 6 averages are also not quite like for like: six seeds
+used to miss the 8-hour cap and were left out of the old one.
 
 ### How this was measured, and what it isn't
 

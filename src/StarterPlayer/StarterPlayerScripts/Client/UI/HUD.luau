@@ -12,6 +12,7 @@
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
+local DailyReward = require(ReplicatedStorage.Shared.Modules.DailyReward)
 local Format = require(ReplicatedStorage.Shared.Modules.Format)
 local GameConfig = require(ReplicatedStorage.Shared.Config.GameConfig)
 local LayerConfig = require(ReplicatedStorage.Shared.Config.LayerConfig)
@@ -32,11 +33,19 @@ export type HUD = {
 	update: (self: HUD, snapshot: ProfileSnapshot?) -> (),
 	updateDepth: (self: HUD) -> (),
 	onOpen: (self: HUD, callback: (string) -> ()) -> (),
+	onSurface: (self: HUD, callback: () -> ()) -> (),
 	destroy: (self: HUD) -> (),
 }
 
 function HUD.new(parent: Instance): HUD
-	local self = setmetatable({ _openCallbacks = {}, _root = nil }, HUD)
+	local self = setmetatable({
+		_openCallbacks = {},
+		_surfaceCallbacks = {},
+		_root = nil,
+		-- Cached so updateDepth, which runs every frame, only touches the
+		-- button on the frame the answer actually changes.
+		_canReturn = nil,
+	}, HUD)
 
 	-- Cache the root part per spawn so updateDepth never does a lookup.
 	local function bindCharacter(character: Model)
@@ -61,7 +70,7 @@ function HUD.new(parent: Instance): HUD
 
 	local outer, inner = Theme.panel({
 		Name = "HUD",
-		Size = UDim2.fromOffset(300, 234),
+		Size = UDim2.fromOffset(300, 306),
 		Position = UDim2.fromOffset(Theme.METRIC.pad, Theme.METRIC.pad),
 	})
 	outer.Parent = parent
@@ -70,15 +79,24 @@ function HUD.new(parent: Instance): HUD
 	Theme.padding(inner)
 	Theme.list(inner, 6)
 
-	-- Coins, the single most important number on screen.
+	--[[
+		Coins, the single most important number on screen -- and in the reference
+		art the money readout is the biggest thing on the HUD by a wide margin,
+		set several steps above its own label. Given a thicker glyph outline than
+		the default to match, since at this size the default looks like a hairline.
+	]]
 	self._coins = Theme.label("$0", {
 		LayoutOrder = 1,
-		Size = UDim2.new(1, 0, 0, 26),
+		Size = UDim2.new(1, 0, 0, 38),
 		Font = Theme.FONT.heading,
-		TextSize = Theme.TEXT_SIZE.title,
+		TextSize = 34,
 		TextColor3 = Theme.COLOR.coins,
 	})
 	self._coins.Parent = inner
+	local coinStroke = self._coins:FindFirstChildOfClass("UIStroke")
+	if coinStroke then
+		coinStroke.Thickness = 3
+	end
 
 	self._income = Theme.label("$0/s", {
 		LayoutOrder = 2,
@@ -126,34 +144,45 @@ function HUD.new(parent: Instance): HUD
 	buttonRow.Size = UDim2.new(1, 0, 0, Theme.METRIC.tapTarget)
 	buttonRow.Parent = inner
 
-	local rowLayout = Instance.new("UIListLayout")
-	rowLayout.FillDirection = Enum.FillDirection.Horizontal
-	rowLayout.Padding = UDim.new(0, Theme.METRIC.gap)
-	rowLayout.SortOrder = Enum.SortOrder.LayoutOrder
-	rowLayout.Parent = buttonRow
+	--[[
+		Shop and Convert used to live here too. They are places now: walking into
+		the lit circle at the tool shop or the ore exchange opens them, and
+		walking out closes them again (UIController's pad watcher).
 
-	-- Five screens in one row would give ~52px buttons; the row is two-deep
-	-- instead so every target stays comfortably past the 44px minimum.
+		What is left is what you carry rather than what you visit -- your bag,
+		the index, and rebirth. Those have no stall to stand in, so they keep
+		buttons.
+
+		Four across one row, the daily reward being the fourth: it has no stall
+		either. At a quarter of the panel each is 67px wide and
+		Theme.METRIC.tapTarget tall, still past the 44px minimum both ways, and
+		the labels are short enough to fit.
+	]]
+	--[[
+		Each button is coloured to match the header of the panel it opens, so the
+		green button opens the green screen. The reference art does the same, and
+		it is worth more than it costs: on a HUD of identical purple buttons the
+		only way to tell them apart is to read them.
+	]]
 	local screens = {
-		{ "Bag", "inventory" },
-		{ "Shop", "shop" },
-		{ "Convert", "convert" },
-		{ "Index", "index" },
-		{ "Rebirth", "rebirth" },
+		{ "Bag", "inventory", Theme.COLOR.warn },
+		{ "Index", "index", Theme.COLOR.accentAlt },
+		{ "Rebirth", "rebirth", Theme.COLOR.coins },
+		{ "Daily", "daily", Theme.COLOR.reward },
 	}
-	buttonRow.Size = UDim2.new(1, 0, 0, Theme.METRIC.tapTarget * 2 + 4)
 
+	-- Four cells and three 4px gaps: each cell gives up 3px of its quarter.
 	local grid = Instance.new("UIGridLayout")
-	grid.CellSize = UDim2.new(1 / 3, -4, 0, Theme.METRIC.tapTarget)
+	grid.CellSize = UDim2.new(1 / #screens, -3, 0, Theme.METRIC.tapTarget)
 	grid.CellPadding = UDim2.fromOffset(4, 4)
 	grid.SortOrder = Enum.SortOrder.LayoutOrder
 	grid.Parent = buttonRow
-	rowLayout:Destroy()
 
 	for index, spec in screens do
 		local button = Theme.button(spec[1], {
 			LayoutOrder = index,
 			TextSize = Theme.TEXT_SIZE.small,
+			accent = spec[3],
 		})
 		button.Parent = buttonRow
 		button.Activated:Connect(function()
@@ -161,9 +190,60 @@ function HUD.new(parent: Instance): HUD
 				callback(spec[2])
 			end
 		end)
+
+		-- A dot on the corner of Daily while a reward is waiting, so it can be
+		-- seen from the HUD without opening anything. `update` shows and hides it.
+		if spec[2] == "daily" then
+			local badge = Instance.new("Frame")
+			badge.Name = "Waiting"
+			badge.AnchorPoint = Vector2.new(1, 0)
+			badge.Position = UDim2.new(1, 4, 0, -4)
+			badge.Size = UDim2.fromOffset(14, 14)
+			badge.BackgroundColor3 = Theme.COLOR.danger
+			badge.BorderSizePixel = 0
+			badge.ZIndex = button.ZIndex + 1
+			badge.Visible = false
+			badge.Parent = button
+			Theme.corner(badge, 7)
+			Theme.stroke(badge, Theme.METRIC.border)
+			self._dailyBadge = badge
+		end
 	end
 
+	--[[
+		Return to surface.
+
+		Its own full-width row rather than a fourth cell in the grid above,
+		because it is a different kind of thing: the three buttons up there open
+		a screen, this one acts on the world. Four cells across 300px would also
+		have left no room for a label anyone could read.
+
+		Disabled at the hub rather than hidden -- a button that comes and goes
+		makes the panel jump, and the disabled label is what teaches the player
+		it exists at all before they ever go down.
+	]]
+	self._surface = Theme.button("RETURN TO SURFACE", {
+		LayoutOrder = 8,
+		Size = UDim2.new(1, 0, 0, Theme.METRIC.tapTarget),
+		TextSize = Theme.TEXT_SIZE.small,
+		accent = Theme.COLOR.accentAlt,
+	})
+	self._surface.Parent = inner
+
+	self._surface.Activated:Connect(function()
+		if self._surface:GetAttribute("Enabled") == false then
+			return
+		end
+		for _, callback in self._surfaceCallbacks do
+			callback()
+		end
+	end)
+
 	return (self :: any) :: HUD
+end
+
+function HUD:onSurface(callback: () -> ())
+	table.insert(self._surfaceCallbacks, callback)
 end
 
 function HUD:onOpen(callback: (string) -> ())
@@ -200,6 +280,13 @@ function HUD:update(snapshot: ProfileSnapshot?)
 
 	local pickaxe = ToolConfig.getPickaxe(snapshot.equippedPickaxe)
 	self._pickaxe.Text = if pickaxe then pickaxe.displayName else "--"
+
+	-- Read against the player's own clock. That only decides whether a dot is
+	-- drawn; the server decides whether a claim is real.
+	if self._dailyBadge then
+		self._dailyBadge.Visible =
+			DailyReward.status(snapshot.dailyLastClaimDay, snapshot.dailyStreak, os.time()).claimable
+	end
 end
 
 --[[
@@ -216,6 +303,17 @@ function HUD:updateDepth()
 	end
 
 	local depth = GameConfig.SurfaceY - root.Position.Y
+
+	-- The ride home is only offered from underground. Written on change rather
+	-- than every frame: this runs on RenderStepped, and setting the attribute
+	-- re-runs the button's colour refresh.
+	local canReturn = depth >= GameConfig.SurfaceReturnMinDepth
+	if canReturn ~= self._canReturn then
+		self._canReturn = canReturn
+		self._surface:SetAttribute("Enabled", canReturn)
+		self._surface.Text = if canReturn then "RETURN TO SURFACE" else "AT THE SURFACE"
+	end
+
 	if depth < 1 then
 		self._depth.Text = "Surface"
 		return
@@ -228,6 +326,7 @@ end
 function HUD:destroy()
 	self.instance:Destroy()
 	table.clear(self._openCallbacks)
+	table.clear(self._surfaceCallbacks)
 end
 
 return HUD

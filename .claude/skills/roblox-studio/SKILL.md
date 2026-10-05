@@ -57,8 +57,28 @@ mineClone.Parent = Services
 require(mineClone).buildPreview()
 ```
 
-Clone every module you changed — a clone that requires a *stale* dependency still
+Clone every module you changed - a clone that requires a *stale* dependency still
 reads the old values. Always destroy the clones afterwards.
+
+**Sweep leftovers first.** A probe that errors before its cleanup line leaves its
+`_T` clone parented, and a name lookup returns the FIRST match - so the next run
+silently requires the *old* source and fails somewhere unrelated. This cost an
+hour: a crashed probe left a `GameConfig_T` from before some new keys existed,
+and every later build died on `attempt to perform arithmetic (add) on number and
+nil` deep inside a module that was itself perfectly correct. Start every
+clone-based run with:
+
+```lua
+for _, root in { ReplicatedStorage, ServerScriptService } do
+    for _, d in root:GetDescendants() do
+        if d.Name:match("_T$") then d:Destroy() end
+    end
+end
+```
+
+The same trap applies to requiring the *real* module in a probe: if it was
+required earlier in the Studio session, you get the cached copy from before your
+edits. Read config through a fresh clone even for a read-only check.
 
 ## Seeing the surface without pressing Play
 
@@ -66,9 +86,15 @@ reads the old values. Always destroy the clones afterwards.
 require(game.ServerScriptService.Server.Services.MineService).buildPreview()
 ```
 
-Builds hub floor, path, wall and the plot shells into `Workspace.HubPreview`;
-`.clearPreview()` removes it. `Start()` clears a stale one first. Surface only —
-the mine streams around a character that does not exist in Edit.
+Builds hub floor, wall, plaza, shops, **lawn decoration, the plot shells and the
+leaderboard cabinets** into `Workspace.HubPreview`; `.clearPreview()` removes it.
+`Start()` clears a stale one first. Surface only - the mine streams around a
+character that does not exist in Edit, so mine blocks are never in the preview.
+
+A **SurfaceGui parented to a Part in Workspace does render in the Edit viewport**,
+unlike a ScreenGui in CoreGui - so the leaderboards can be read without pressing
+Play. The preview fills them with placeholder ranks, because DataStores are not
+reachable from Edit and an empty board shows nothing about the layout.
 
 ## screen_capture
 
@@ -87,13 +113,37 @@ cam.Focus = CFrame.new(target)
 - `start_stop_play` is unreliable, and "Game Stopped" can be a lie — check
   `get_studio_state` before assuming you are back in Edit.
 
+## A backgrounded Studio does not render, and that breaks two things
+
+If the Studio window is not in the foreground it stops rendering, and **every
+render-phase callback stops with it**. Measured in a Play session:
+
+```
+over 1s -- RenderStepped=0  Stepped=61  Heartbeat=61
+```
+
+So `RenderStepped` and `BindToRenderStep` never fire, while `Stepped` and
+`Heartbeat` run normally at 60 Hz. Anything driven from the render phase —
+MiningController's targeting loop, SwingAnimator's pose — is simply inert, and
+it looks exactly like a bug in the code rather than in the harness. `screen_capture`
+times out in the same state, so there is no visual fallback either.
+
+Check it before concluding a render-bound feature is broken, and verify the
+logic another way: **writing `Motor6D.Transform` from a `Stepped` connection does
+pose the rig**, so a render-bound animation can be held at a fixed pose from
+`Stepped` and measured numerically. Ask for the window to be foregrounded if the
+animation itself has to be watched.
+
 ## Colour and material
 
 - `Enum.Material.Ground` drains part colour to grey. A correctly brown wall
   rendered as slate until it was switched to `SmoothPlastic`. Check a material
   against a screenshot before trusting `.Color`.
-- `cartoonify` multiplies saturation by **1.45**, so a colour picked to look
-  right on its own comes out orange.
+- `cartoonify` multiplies saturation by **1.62** and value by 1.2, so a colour
+  picked to look right on its own comes out orange. Mine block bodies are
+  `SmoothPlastic` (GameConfig.MineBlockMaterial) for the same reason the wall is:
+  a grained material is shaded for realism, which is the grey-ward drag
+  `cartoonify` exists to undo, and the material wins.
 - Faces pointing away from the sun get `SurfaceAmbient`, a blue-grey, which
   drains a gentle brown to mauve. **Tune colours against a lit screenshot, not on
   paper.**

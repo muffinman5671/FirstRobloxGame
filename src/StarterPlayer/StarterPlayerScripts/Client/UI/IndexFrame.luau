@@ -14,6 +14,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local BrainrotConfig = require(ReplicatedStorage.Shared.Config.BrainrotConfig)
 local Format = require(ReplicatedStorage.Shared.Modules.Format)
+local IndexBonus = require(ReplicatedStorage.Shared.Modules.IndexBonus)
 local Rarity = require(ReplicatedStorage.Shared.Modules.Rarity)
 local SharedTypes = require(ReplicatedStorage.Shared.Modules.SharedTypes)
 local Theme = require(script.Parent.Theme)
@@ -42,25 +43,8 @@ function IndexFrame.new(parent: Instance): IndexFrame
 	outer.Parent = parent
 	self.instance = outer
 
-	local header = Instance.new("Frame")
-	header.BackgroundColor3 = Theme.COLOR.panelRaised
-	header.BorderSizePixel = 0
-	header.Size = UDim2.new(1, 0, 0, Theme.METRIC.headerHeight)
+	local header, close = Theme.header("Index", { accent = Theme.COLOR.accentAlt })
 	header.Parent = inner
-
-	local title = Theme.label("INDEX", {
-		Font = Theme.FONT.heading,
-		TextSize = Theme.TEXT_SIZE.heading,
-		Size = UDim2.new(1, -Theme.METRIC.tapTarget, 1, 0),
-		Position = UDim2.fromOffset(Theme.METRIC.pad, 0),
-	})
-	title.Parent = header
-
-	local close = Theme.button("X", {
-		Size = UDim2.fromOffset(Theme.METRIC.tapTarget, Theme.METRIC.headerHeight),
-		Position = UDim2.new(1, -Theme.METRIC.tapTarget, 0, 0),
-	})
-	close.Parent = header
 	close.Activated:Connect(function()
 		self:setVisible(false)
 	end)
@@ -113,7 +97,14 @@ function IndexFrame:update(snapshot: ProfileSnapshot?)
 	end
 
 	local discovered = snapshot.indexDiscovered or {}
-	local found = 0
+
+	-- Counts and the income bonus come from the same module the server pays
+	-- from, so this screen cannot promise a number the game does not honour.
+	local summary = IndexBonus.summarize(discovered)
+	local bandFor: { [string]: IndexBonus.Band } = {}
+	for _, info in summary.bands do
+		bandFor[info.rarity] = info
+	end
 
 	-- Group by rarity, ascending, so the log reads as a progression.
 	local order = {}
@@ -138,21 +129,40 @@ function IndexFrame:update(snapshot: ProfileSnapshot?)
 	for _, def in order do
 		if def.rarity ~= lastRarity then
 			lastRarity = def.rarity
-			local band = Theme.label(def.rarity:upper(), {
-				Size = UDim2.new(1, 0, 0, 22),
-				Font = Theme.FONT.heading,
-				TextSize = Theme.TEXT_SIZE.small,
-				TextColor3 = Rarity.color(def.rarity),
-				LayoutOrder = nextOrder(),
-			})
+			local info = bandFor[def.rarity]
+
+			local band = Theme.label(
+				if info then `{def.rarity:upper()}  {info.found}/{info.total}` else def.rarity:upper(),
+				{
+					Size = UDim2.new(1, 0, 0, 22),
+					Font = Theme.FONT.heading,
+					TextSize = Theme.TEXT_SIZE.small,
+					TextColor3 = Rarity.color(def.rarity),
+					LayoutOrder = nextOrder(),
+				}
+			)
 			band.Parent = self._list
 			table.insert(self._rows, band)
+
+			-- What finishing the band is worth -- or that it has already paid.
+			-- A child of the band label, so it is destroyed along with it.
+			if info and info.setBonus > 0 then
+				local reward = Theme.label(
+					if info.complete
+						then `SET COMPLETE  +{Format.percent(info.setBonus)} income`
+						else `+{Format.percent(info.setBonus)} income when complete`,
+					{
+						Size = UDim2.fromScale(1, 1),
+						TextSize = Theme.TEXT_SIZE.small,
+						TextXAlignment = Enum.TextXAlignment.Right,
+						TextColor3 = if info.complete then Theme.COLOR.accent else Theme.COLOR.textDim,
+					}
+				)
+				reward.Parent = band
+			end
 		end
 
 		local known = discovered[def.id] == true
-		if known then
-			found += 1
-		end
 
 		local row = Instance.new("Frame")
 		row.BackgroundColor3 = if known then Theme.COLOR.panelRaised else Theme.COLOR.panelSunken
@@ -161,15 +171,13 @@ function IndexFrame:update(snapshot: ProfileSnapshot?)
 		row.LayoutOrder = nextOrder()
 		row.Parent = self._list
 		table.insert(self._rows, row)
+		Theme.card(row)
 
-		local swatch = Instance.new("Frame")
 		-- Undiscovered entries keep the rarity colour but heavily dimmed, so
 		-- the band is legible without revealing which character it is.
-		swatch.BackgroundColor3 = if known
+		local swatch = Theme.accentBar(if known
 			then Rarity.color(def.rarity)
-			else Rarity.color(def.rarity):Lerp(Color3.new(0, 0, 0), 0.72)
-		swatch.BorderSizePixel = 0
-		swatch.Size = UDim2.new(0, 5, 1, 0)
+			else Rarity.color(def.rarity):Lerp(Color3.new(0, 0, 0), 0.72))
 		swatch.Parent = row
 
 		local name = Theme.label(if known then def.displayName else "? ? ?", {
@@ -190,9 +198,13 @@ function IndexFrame:update(snapshot: ProfileSnapshot?)
 		income.Parent = row
 	end
 
-	local total = BrainrotConfig.COUNT
-	local fraction = if total > 0 then found / total else 0
-	self._completion.Text = ("%d / %d discovered  --  %s"):format(found, total, Format.percent(fraction))
+	local fraction = if summary.total > 0 then summary.found / summary.total else 0
+	self._completion.Text = ("%d / %d discovered  --  %s  --  +%s income"):format(
+		summary.found,
+		summary.total,
+		Format.percent(fraction),
+		Format.percent(summary.bonus)
+	)
 	self._bar.Size = UDim2.fromScale(fraction, 1)
 end
 

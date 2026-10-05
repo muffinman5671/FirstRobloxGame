@@ -62,25 +62,8 @@ function ConvertFrame.new(parent: Instance): ConvertFrame
 	outer.Parent = parent
 	self.instance = outer
 
-	local header = Instance.new("Frame")
-	header.BackgroundColor3 = Theme.COLOR.panelRaised
-	header.BorderSizePixel = 0
-	header.Size = UDim2.new(1, 0, 0, Theme.METRIC.headerHeight)
+	local header, close = Theme.header("Conversion Chamber", { accent = Theme.COLOR.header })
 	header.Parent = inner
-
-	local title = Theme.label("CONVERSION CHAMBER", {
-		Font = Theme.FONT.heading,
-		TextSize = Theme.TEXT_SIZE.heading,
-		Size = UDim2.new(1, -Theme.METRIC.tapTarget, 1, 0),
-		Position = UDim2.fromOffset(Theme.METRIC.pad, 0),
-	})
-	title.Parent = header
-
-	local close = Theme.button("X", {
-		Size = UDim2.fromOffset(Theme.METRIC.tapTarget, Theme.METRIC.headerHeight),
-		Position = UDim2.new(1, -Theme.METRIC.tapTarget, 0, 0),
-	})
-	close.Parent = header
 	close.Activated:Connect(function()
 		self:setVisible(false)
 	end)
@@ -189,8 +172,7 @@ function ConvertFrame:onSellBrainrot(cb) table.insert(self._sellCallbacks, cb) e
 
 function ConvertFrame:_refreshTabs()
 	for name, button in self._tabButtons do
-		button.BackgroundColor3 = if name == self._tab then Theme.COLOR.accent else Theme.COLOR.buttonIdle
-		button.TextColor3 = if name == self._tab then Theme.COLOR.panelSunken else Theme.COLOR.text
+		button:SetAttribute("Selected", name == self._tab)
 	end
 	self._roll.Visible = self._tab == "Convert"
 end
@@ -202,6 +184,7 @@ local function row(parent: Instance, order: number, height: number): Frame
 	frame.Size = UDim2.new(1, 0, 0, height)
 	frame.LayoutOrder = order
 	frame.Parent = parent
+	Theme.card(frame)
 	return frame
 end
 

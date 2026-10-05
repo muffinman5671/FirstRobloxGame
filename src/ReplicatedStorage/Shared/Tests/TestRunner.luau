@@ -65,7 +65,15 @@ end
 
 -- Suites are listed rather than discovered so the run order is stable and a
 -- half-written module can't silently join the suite.
-local SUITE_NAMES = { "RarityTest", "FormatTest", "EconomyTest", "ConversionTest", "SessionLockTest" }
+local SUITE_NAMES = {
+	"RarityTest",
+	"FormatTest",
+	"EconomyTest",
+	"ConversionTest",
+	"DailyRewardTest",
+	"SessionLockTest",
+	"MigrationTest",
+}
 
 function Tests.runAll(): string
 	local out = {}

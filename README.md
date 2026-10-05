@@ -174,7 +174,7 @@ DESIGN.md §2.
 | D | Conversion, plots, income | Done |
 | E | UI polish, effects, leaderboards, tests | Done |
 
-11 server services, 5 client controllers, 7 UI modules.
+12 server services, 5 client controllers, 8 UI modules.
 
 ## Tests
 
@@ -186,7 +186,8 @@ print(require(game.ReplicatedStorage.Shared.Tests.TestRunner).runAll())
 
 Covers weighted-roll distribution over 100k seeded rolls, the pity guarantee,
 number formatting, the generated tool curves against their config constants,
-conversion odds, and the session-lock rules. 132 assertions.
+conversion odds, the index bonus, the daily reward's rules, the schema-1 to
+schema-2 profile migration, and the session-lock rules. 193 assertions.
 
 Two heavier tools sit alongside the suite and are deliberately *not* part of
 `runAll()` — one makes live DataStore calls, the other runs a simulation:

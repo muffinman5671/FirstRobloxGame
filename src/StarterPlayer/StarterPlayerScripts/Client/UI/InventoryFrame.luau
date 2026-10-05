@@ -31,11 +31,30 @@ export type InventoryFrame = {
 	update: (self: InventoryFrame, snapshot: ProfileSnapshot?) -> (),
 	setVisible: (self: InventoryFrame, visible: boolean) -> (),
 	onSell: (self: InventoryFrame, callback: (string?) -> ()) -> (),
+	setSellable: (self: InventoryFrame, sellable: boolean) -> (),
 	destroy: (self: InventoryFrame) -> (),
 }
 
 function InventoryFrame.new(parent: Instance): InventoryFrame
-	local self = setmetatable({ _sellCallbacks = {}, _rows = {} }, InventoryFrame)
+	--[[
+		`_sellable` is whether the player is standing at the sell stall.
+
+		Ore is sold there and nowhere else, but the Backpack itself opens
+		anywhere -- checking your haul underground is the point of it. So the
+		panel stays fully readable off the pad and only the Sell buttons go
+		grey, with the button label saying why rather than leaving the player to
+		work out what is broken. UIController drives it off the same circle that
+		opens this panel, and the server checks it again on the sale.
+
+		Starts false: you spawn at the hub spawn, not on the stall's circle.
+	]]
+	local self = setmetatable({
+		_sellCallbacks = {},
+		_rows = {},
+		_sellButtons = {},
+		_sellable = false,
+		_held = 0,
+	}, InventoryFrame)
 
 	local outer, inner = Theme.panel({
 		Name = "Inventory",
@@ -47,25 +66,9 @@ function InventoryFrame.new(parent: Instance): InventoryFrame
 	self.instance = outer
 
 	-- Header
-	local header = Instance.new("Frame")
-	header.BackgroundColor3 = Theme.COLOR.panelRaised
-	header.BorderSizePixel = 0
-	header.Size = UDim2.new(1, 0, 0, Theme.METRIC.headerHeight)
+	local header, close = Theme.header("Backpack", { accent = Theme.COLOR.warn })
 	header.Parent = inner
-
-	local title = Theme.label("BACKPACK", {
-		Font = Theme.FONT.heading,
-		TextSize = Theme.TEXT_SIZE.heading,
-		Size = UDim2.new(1, -Theme.METRIC.tapTarget, 1, 0),
-		Position = UDim2.fromOffset(Theme.METRIC.pad, 0),
-	})
-	title.Parent = header
-
-	self._close = Theme.button("X", {
-		Size = UDim2.fromOffset(Theme.METRIC.tapTarget, Theme.METRIC.headerHeight),
-		Position = UDim2.new(1, -Theme.METRIC.tapTarget, 0, 0),
-	})
-	self._close.Parent = header
+	self._close = close
 
 	-- Scrolling list of ore rows.
 	local list = Instance.new("ScrollingFrame")
@@ -110,6 +113,8 @@ function InventoryFrame.new(parent: Instance): InventoryFrame
 	})
 	self._sellAll.Parent = inner
 
+	self._sellAll:SetAttribute("Enabled", false)
+
 	self._sellAll.Activated:Connect(function()
 		if self._sellAll:GetAttribute("Enabled") == false then
 			return
@@ -130,6 +135,33 @@ function InventoryFrame:onSell(callback: (string?) -> ())
 	table.insert(self._sellCallbacks, callback)
 end
 
+--[[
+	Sell All carries both refusals, because it is the one button that is always
+	on screen: nothing in the bag, or nothing you can do about it from here. The
+	per-ore buttons only carry the second -- a row cannot exist for ore you do
+	not hold.
+]]
+function InventoryFrame:_refreshSell()
+	local has = self._held > 0
+	self._sellAll:SetAttribute("Enabled", has and self._sellable)
+	self._sellAll.Text = if not has
+		then "NOTHING TO SELL"
+		elseif not self._sellable then "GO TO THE SELL STALL"
+		else "SELL ALL"
+
+	for _, button in self._sellButtons do
+		button:SetAttribute("Enabled", self._sellable)
+	end
+end
+
+function InventoryFrame:setSellable(sellable: boolean)
+	if sellable == self._sellable then
+		return
+	end
+	self._sellable = sellable
+	self:_refreshSell()
+end
+
 -- One row: rarity swatch, name, count, value, and a per-ore sell button.
 function InventoryFrame:_buildRow(oreId: string, count: number, multiplier: number, order: number)
 	local ore = OreConfig.get(oreId)
@@ -143,12 +175,10 @@ function InventoryFrame:_buildRow(oreId: string, count: number, multiplier: numb
 	row.Size = UDim2.new(1, 0, 0, Theme.METRIC.tapTarget)
 	row.LayoutOrder = order
 	row.Parent = self._list
+	Theme.card(row)
 
 	-- Rarity reads as a colour bar rather than a word, so the row stays short.
-	local swatch = Instance.new("Frame")
-	swatch.BackgroundColor3 = Rarity.color(ore.rarity)
-	swatch.BorderSizePixel = 0
-	swatch.Size = UDim2.new(0, 5, 1, 0)
+	local swatch = Theme.accentBar(Rarity.color(ore.rarity))
 	swatch.Parent = row
 
 	local name = Theme.label(ore.displayName, {
@@ -181,20 +211,28 @@ function InventoryFrame:_buildRow(oreId: string, count: number, multiplier: numb
 	})
 	sell.Parent = row
 
+	sell:SetAttribute("Enabled", self._sellable)
 	sell.Activated:Connect(function()
+		if sell:GetAttribute("Enabled") == false then
+			return
+		end
 		for _, callback in self._sellCallbacks do
 			callback(oreId)
 		end
 	end)
 
 	table.insert(self._rows, row)
+	table.insert(self._sellButtons, sell)
 end
 
 function InventoryFrame:update(snapshot: ProfileSnapshot?)
+	-- Rows are rebuilt wholesale, so the button list has to go with them or it
+	-- fills up with destroyed instances.
 	for _, row in self._rows do
 		row:Destroy()
 	end
 	table.clear(self._rows)
+	table.clear(self._sellButtons)
 
 	if not snapshot then
 		return
@@ -230,8 +268,8 @@ function InventoryFrame:update(snapshot: ProfileSnapshot?)
 	self._empty.Visible = #held == 0
 	self._empty.LayoutOrder = 999
 	self._total.Text = "Total: $" .. Format.abbreviate(total)
-	self._sellAll:SetAttribute("Enabled", #held > 0)
-	self._sellAll.Text = if #held > 0 then "SELL ALL" else "NOTHING TO SELL"
+	self._held = #held
+	self:_refreshSell()
 end
 
 function InventoryFrame:setVisible(visible: boolean)
@@ -242,6 +280,7 @@ function InventoryFrame:destroy()
 	self.instance:Destroy()
 	table.clear(self._sellCallbacks)
 	table.clear(self._rows)
+	table.clear(self._sellButtons)
 end
 
 return InventoryFrame

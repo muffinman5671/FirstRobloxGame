@@ -49,6 +49,7 @@ local BOOT_ORDER = {
 	"ConversionService",
 	"PlotService",
 	"IncomeService",
+	"DailyRewardService",
 	"LeaderboardService",
 }
 

@@ -50,7 +50,7 @@ local DataService = {}
 DataService.Name = "DataService"
 
 -- Bump when the Profile shape changes, and add a matching MIGRATIONS entry.
-local SCHEMA_VERSION = 1
+local SCHEMA_VERSION = 2
 
 local STORE_NAME = "PlayerProfiles"
 local STORE_SCOPE = "v1"
@@ -108,6 +108,8 @@ local function defaultProfile(): Profile
 		plotSlots = GameConfig.StartingPlotSlots,
 		lastOnlineUnix = 0,
 		playtime = 0,
+		dailyStreak = 0,
+		dailyLastClaimDay = 0,
 	}
 end
 
@@ -119,11 +121,52 @@ end
 	Keep them total: a migration must never assume a field exists.
 ]]
 local MIGRATIONS: { [number]: (Profile) -> Profile } = {
-	-- [1] = function(profile)
-	--     profile.newField = 0
-	--     profile.schemaVersion = 2
-	--     return profile
-	-- end,
+	--[[
+		1 -> 2: the podium cap came down from 24 to 10, and the daily reward
+		fields arrived.
+
+		A profile holding more slots than the cap gets its coins back for each
+		one it loses, and anything standing on a podium that no longer exists
+		goes back into storage -- still owned, just unplaced. The daily fields
+		need no step of their own; reconcile fills them from the defaults.
+
+		The refund is priced with the numbers as they stood under schema 1,
+		written out here rather than read from config. A migration describes the
+		past, and must keep giving the same answer after the config moves on.
+	]]
+	[1] = function(profile)
+		local V2_SLOT_CAP = 10
+		local V1_STARTING_SLOTS, V1_SLOT_BASE_PRICE, V1_COST_GROWTH = 4, 5000, 1.55
+
+		local slots = if type(profile.plotSlots) == "number" then profile.plotSlots else V1_STARTING_SLOTS
+
+		if slots > V2_SLOT_CAP then
+			local refund = 0
+			for held = V2_SLOT_CAP, slots - 1 do
+				-- What the slot bought while holding `held` cost, rounded the way
+				-- the shop rounded it: to two significant figures.
+				local price = V1_SLOT_BASE_PRICE * V1_COST_GROWTH ^ (held - V1_STARTING_SLOTS)
+				local magnitude = 10 ^ (math.floor(math.log10(price)) - 1)
+				refund += math.floor(price / magnitude + 0.5) * magnitude
+			end
+
+			profile.coins = (if type(profile.coins) == "number" then profile.coins else 0) + refund
+			profile.plotSlots = V2_SLOT_CAP
+		end
+
+		if type(profile.placedBrainrots) == "table" then
+			local kept = {}
+			for _, placed in profile.placedBrainrots do
+				if type(placed) == "table" and type(placed.slot) == "number" and placed.slot <= V2_SLOT_CAP then
+					table.insert(kept, placed)
+				end
+			end
+			profile.placedBrainrots = kept
+		end
+
+		profile.schemaVersion = 2
+		return profile
+	end,
 }
 
 -- ==========================================================================
@@ -770,6 +813,8 @@ function DataService.buildSnapshot(player: Player): SharedTypes.ProfileSnapshot?
 		indexDiscovered = deepCopy(profile.indexDiscovered),
 		plotSlots = profile.plotSlots,
 		incomePerSecond = if incomeProvider then incomeProvider(player) else 0,
+		dailyStreak = profile.dailyStreak,
+		dailyLastClaimDay = profile.dailyLastClaimDay,
 	}
 end
 

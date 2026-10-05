@@ -19,6 +19,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local BrainrotConfig = require(ReplicatedStorage.Shared.Config.BrainrotConfig)
 local GameConfig = require(ReplicatedStorage.Shared.Config.GameConfig)
+local IndexBonus = require(ReplicatedStorage.Shared.Modules.IndexBonus)
 local RemoteRegistry = require(ReplicatedStorage.Shared.Remotes.RemoteRegistry)
 local SharedTypes = require(ReplicatedStorage.Shared.Modules.SharedTypes)
 local ToolConfig = require(ReplicatedStorage.Shared.Config.ToolConfig)
@@ -48,6 +49,10 @@ local carry: { [Player]: number } = {}
 	Only counts placements in slots the player has actually unlocked. Without
 	that check, refunding or losing slots would leave a brainrot in slot 20
 	still paying out while invisible on the plot.
+
+	Two multipliers sit on top of the podiums: rebirths, and the index bonus
+	for how much of the collection has been discovered. PlotService prints the
+	same product on each podium's billboard, so change both together.
 ]]
 function IncomeService.rateFor(profile: Profile): number
 	if #profile.placedBrainrots == 0 then
@@ -69,7 +74,7 @@ function IncomeService.rateFor(profile: Profile): number
 		end
 	end
 
-	return total * ToolConfig.rebirthMultiplier(profile.rebirths)
+	return total * ToolConfig.rebirthMultiplier(profile.rebirths) * IndexBonus.multiplier(profile.indexDiscovered)
 end
 
 function IncomeService.rateForPlayer(player: Player): number
