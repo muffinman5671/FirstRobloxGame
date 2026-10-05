@@ -242,7 +242,13 @@ never returns `nil` from a cancelled transform.
   concurrency is not.
 - **`BindToClose` under a real shutdown.** Verified via stopping Play, which
   fires the same path, but not against an actual server shutdown with the 30
-  second budget Roblox allows.
+  second budget Roblox allows. Stopping Play did find a real bug here:
+  `PlayerRemoving` fires an instant before `BindToClose`, the handler saw the
+  leaving player's save already in flight, counted nothing left to do, and let
+  the server close on top of the write. About one stop in four lost the final
+  save and left the session lock behind. It now waits for the sessions table
+  to empty instead; a traced stop shows the server held open until the save
+  returns.
 - **No human playthrough.** The §7 balance targets are *modelled*, not played —
   see the measured table and its caveats in BALANCE.md. The model now scales
   travel time with depth, which turned out to change the milestones by less than

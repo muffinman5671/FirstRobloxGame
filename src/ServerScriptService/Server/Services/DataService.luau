@@ -900,25 +900,41 @@ function DataService.Start()
 		end
 	end)
 
-	-- Final flush. BindToClose blocks shutdown until every profile is released,
-	-- which is the last chance to clear locks cleanly.
+	--[[
+		Final flush. BindToClose holds the server open until this returns, which
+		is the last chance to get every profile written and its lock cleared.
+
+		It waits for the sessions table to empty, not for the releases it starts
+		itself, and that distinction is the fix for a save that was being lost.
+		When the last player leaves, PlayerRemoving fires first and starts their
+		release; this runs an instant later with that save still in flight.
+		releaseProfile, asked a second time, returns at once because the session
+		is already releasing -- so a count of releases started here reached zero
+		immediately, this returned, and the server closed on top of the write.
+		Sometimes the write had already gone out and landed. Sometimes the last
+		stretch of play was lost and the lock was left behind, which on a live
+		server means the player cannot rejoin until it goes stale.
+
+		A session only leaves the table once its save has returned, so an empty
+		table is the thing actually worth waiting for.
+	]]
 	game:BindToClose(function()
 		if mockStore then
 			return
 		end
 
-		local remaining = 0
+		-- A no-op for anyone PlayerRemoving has already started on.
 		for player in sessions do
-			remaining += 1
-			task.spawn(function()
-				releaseProfile(player)
-				remaining -= 1
-			end)
+			task.spawn(releaseProfile, player)
 		end
 
 		local deadline = os.clock() + 25
-		while remaining > 0 and os.clock() < deadline do
+		while next(sessions) ~= nil and os.clock() < deadline do
 			task.wait(0.1)
+		end
+
+		for player in sessions do
+			warn(`[DataService] shut down before {player.Name}'s final save returned`)
 		end
 	end)
 end
