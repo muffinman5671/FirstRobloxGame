@@ -245,10 +245,10 @@ never returns `nil` from a cancelled transform.
   second budget Roblox allows. Stopping Play did find a real bug here:
   `PlayerRemoving` fires an instant before `BindToClose`, the handler saw the
   leaving player's save already in flight, counted nothing left to do, and let
-  the server close on top of the write. About one stop in four lost the final
-  save and left the session lock behind. It now waits for the sessions table
-  to empty instead; a traced stop shows the server held open until the save
-  returns.
+  the server close on top of the write. Whether the write survived was a race:
+  of four stops tested before the fix, one lost the final save and left the
+  session lock behind. It now waits for the sessions table to empty instead; a
+  traced stop shows the server held open until the save returns.
 - **No human playthrough.** The §7 balance targets are *modelled*, not played —
   see the measured table and its caveats in BALANCE.md. The model now scales
   travel time with depth, which turned out to change the milestones by less than
