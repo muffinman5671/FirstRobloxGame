@@ -15,10 +15,14 @@
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
 local Workspace = game:GetService("Workspace")
 
+local Format = require(ReplicatedStorage.Shared.Modules.Format)
+local GameConfig = require(ReplicatedStorage.Shared.Config.GameConfig)
 local OreConfig = require(ReplicatedStorage.Shared.Config.OreConfig)
 local RemoteRegistry = require(ReplicatedStorage.Shared.Remotes.RemoteRegistry)
+local Theme = require(script.Parent.Parent.UI.Theme)
 local Trove = require(ReplicatedStorage.Shared.Modules.Trove)
 
 local EffectsController = {}
@@ -32,6 +36,12 @@ local trove = Trove.new()
 local MAX_EFFECT_DISTANCE = 120
 local POOL_SIZE = 12
 local BURST_LIFETIME = 0.7
+
+-- Chips off an ordinary hit, and off a critical one. A crit is gold everywhere
+-- it shows -- the chips and the number -- so the two read as one event.
+local CHIP_COLOR = Color3.fromRGB(238, 240, 246)
+local CRIT_COLOR = Theme.COLOR.coins
+local CHIP_COUNT, CRIT_CHIP_COUNT = 5, 14
 
 local folder: Folder
 local pool: { BasePart } = {}
@@ -100,6 +110,155 @@ local function burst(position: Vector3, color: Color3, count: number)
 	end
 end
 
+-- ==========================================================================
+-- Hit numbers
+-- ==========================================================================
+--[[
+	The damage of each swing, floated off the block it landed on.
+
+	Pooled round-robin like the bursts, and for the same reason. Each number is
+	a BillboardGui on its own invisible anchor rather than adorned to the block:
+	blocks are pooled server-side, so the part a number was raised on may be a
+	different block somewhere else before the number has finished rising.
+
+	Snappy rather than soft, per the art direction: the number lands oversized,
+	drops to size within a few frames, rises on an ease-out and is gone. The
+	only fade is the last fraction of its life, so it does not blink out.
+]]
+
+-- Fractions of a number's life: how long the landing pop takes to settle, and
+-- when the closing fade begins.
+local POP_FRACTION = 0.18
+local FADE_FROM = 0.7
+
+-- How far a number is scattered sideways from the block's centre, in studs, so
+-- a run of hits on one block reads as separate numbers rather than one that
+-- flickers.
+local SCATTER = 1.5
+
+local TEXT_SIZE, CRIT_TEXT_SIZE = 24, 34
+local POP_SCALE, CRIT_POP_SCALE = 1.5, 2.1
+
+type HitNumber = {
+	anchor: BasePart,
+	gui: BillboardGui,
+	label: TextLabel,
+	stroke: UIStroke?,
+	scale: UIScale,
+	startedAt: number,
+	popFrom: number,
+}
+
+local hitNumbers: { HitNumber } = {}
+local nextHitNumber = 1
+local scatter = Random.new()
+
+local function makeHitNumber(): HitNumber
+	local anchor = Instance.new("Part")
+	anchor.Name = "HitNumber"
+	anchor.Size = Vector3.new(0.2, 0.2, 0.2)
+	anchor.Transparency = 1
+	anchor.Anchored = true
+	anchor.CanCollide = false
+	anchor.CanQuery = false
+	anchor.CanTouch = false
+	anchor.CastShadow = false
+	anchor.Parent = folder
+
+	-- Parented to the anchor, which makes the anchor its adornee. Sized in
+	-- pixels so a number reads the same at any reach.
+	local gui = Instance.new("BillboardGui")
+	gui.Name = "Number"
+	gui.Size = UDim2.fromOffset(160, 52)
+	gui.AlwaysOnTop = true
+	gui.LightInfluence = 0
+	gui.Enabled = false
+	gui.Parent = anchor
+
+	local label = Theme.label("", {
+		Size = UDim2.fromScale(1, 1),
+		Font = Theme.FONT.number,
+		TextSize = TEXT_SIZE,
+		TextXAlignment = Enum.TextXAlignment.Center,
+	})
+	label.Parent = gui
+
+	local scale = Instance.new("UIScale")
+	scale.Parent = label
+
+	return {
+		anchor = anchor,
+		gui = gui,
+		label = label,
+		-- Theme.label adds the glyph outline; it has to fade with the text.
+		stroke = label:FindFirstChildOfClass("UIStroke"),
+		scale = scale,
+		startedAt = 0,
+		popFrom = POP_SCALE,
+	}
+end
+
+local function showHitNumber(position: Vector3, amount: number, crit: boolean)
+	if #hitNumbers == 0 then
+		return
+	end
+
+	-- Oldest first, whether or not it has finished: a number cut short by a
+	-- newer one is better than a hit that shows nothing.
+	local number = hitNumbers[nextHitNumber]
+	nextHitNumber = nextHitNumber % #hitNumbers + 1
+
+	number.anchor.Position = position
+		+ Vector3.new(scatter:NextNumber(-SCATTER, SCATTER), 0, scatter:NextNumber(-SCATTER, SCATTER))
+
+	local text = Format.abbreviate(math.max(1, math.round(amount)))
+	number.label.Text = if crit then text .. "!" else text
+	number.label.TextColor3 = if crit then CRIT_COLOR else Theme.COLOR.text
+	number.label.TextSize = if crit then CRIT_TEXT_SIZE else TEXT_SIZE
+	number.label.TextTransparency = 0
+	if number.stroke then
+		number.stroke.Transparency = 0
+	end
+
+	number.popFrom = if crit then CRIT_POP_SCALE else POP_SCALE
+	number.scale.Scale = number.popFrom
+	number.gui.StudsOffsetWorldSpace = Vector3.zero
+	number.startedAt = os.clock()
+	number.gui.Enabled = true
+end
+
+--[[
+	Heartbeat rather than RenderStepped: nothing here depends on the camera or
+	the character's pose this frame, and RenderStepped work holds the frame up.
+]]
+local function stepHitNumbers()
+	local now = os.clock()
+
+	for _, number in hitNumbers do
+		if number.gui.Enabled then
+			local t = (now - number.startedAt) / GameConfig.HitNumberSeconds
+
+			if t >= 1 then
+				number.gui.Enabled = false
+			else
+				-- Ease-out cubic: most of the rise happens straight away.
+				local k = 1 - t
+				number.gui.StudsOffsetWorldSpace = Vector3.new(0, GameConfig.HitNumberRise * (1 - k * k * k), 0)
+
+				number.scale.Scale = if t < POP_FRACTION
+					then number.popFrom + (1 - number.popFrom) * (t / POP_FRACTION)
+					else 1
+
+				local fade = if t > FADE_FROM then (t - FADE_FROM) / (1 - FADE_FROM) else 0
+				number.label.TextTransparency = fade
+				if number.stroke then
+					number.stroke.Transparency = fade
+				end
+			end
+		end
+	end
+end
+
 function EffectsController.Init()
 	folder = Instance.new("Folder")
 	folder.Name = "Effects"
@@ -108,6 +267,10 @@ function EffectsController.Init()
 
 	for _ = 1, POOL_SIZE do
 		table.insert(pool, makeEmitterPart())
+	end
+
+	for _ = 1, GameConfig.HitNumberPool do
+		table.insert(hitNumbers, makeHitNumber())
 	end
 end
 
@@ -121,13 +284,32 @@ function EffectsController.Start()
 		burst(position, if ore then ore.color else Color3.fromRGB(150, 150, 150), 18)
 	end)
 
-	-- A hit only the swinging player sees, so it stays small.
-	trove:Connect(RemoteRegistry.event("BlockDamaged").OnClientEvent, function(position: Vector3)
-		if typeof(position) ~= "Vector3" then
-			return
+	--[[
+		A hit only the swinging player sees. The server sends one for every
+		swing that lands, including the one that breaks the block, which
+		arrives with a fraction of 0.
+	]]
+	trove:Connect(
+		RemoteRegistry.event("BlockDamaged").OnClientEvent,
+		function(position: Vector3, fraction: number?, amount: number?, crit: boolean?)
+			if typeof(position) ~= "Vector3" then
+				return
+			end
+
+			local isCrit = crit == true
+			if isCrit then
+				burst(position, CRIT_COLOR, CRIT_CHIP_COUNT)
+			elseif type(fraction) ~= "number" or fraction > 0 then
+				-- The breaking hit skips its chips: BlockBroken's burst is
+				-- already going off in the same place.
+				burst(position, CHIP_COLOR, CHIP_COUNT)
+			end
+
+			if type(amount) == "number" then
+				showHitNumber(position, amount, isCrit)
+			end
 		end
-		burst(position, Color3.fromRGB(238, 240, 246), 5)
-	end)
+	)
 
 	-- Ore landing in the bag: a small flash at the player, so a credit is
 	-- visible even when the block that dropped it is off screen.
@@ -139,11 +321,14 @@ function EffectsController.Start()
 			burst(root.Position + Vector3.new(0, 3, 0), if ore then ore.color else Color3.fromRGB(200, 200, 200), 4)
 		end
 	end)
+
+	trove:Connect(RunService.Heartbeat, stepHitNumbers)
 end
 
 function EffectsController.Stop()
 	trove:Clean()
 	table.clear(pool)
+	table.clear(hitNumbers)
 end
 
 return EffectsController

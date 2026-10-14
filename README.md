@@ -174,7 +174,7 @@ DESIGN.md §2.
 | D | Conversion, plots, income | Done |
 | E | UI polish, effects, leaderboards, tests | Done |
 
-11 server services, 5 client controllers, 7 UI modules.
+12 server services, 5 client controllers, 8 UI modules.
 
 ## Tests
 
@@ -186,7 +186,8 @@ print(require(game.ReplicatedStorage.Shared.Tests.TestRunner).runAll())
 
 Covers weighted-roll distribution over 100k seeded rolls, the pity guarantee,
 number formatting, the generated tool curves against their config constants,
-conversion odds, and the session-lock rules. 132 assertions.
+conversion odds, the index bonus, the daily reward's rules, the schema-1 to
+schema-2 profile migration, and the session-lock rules. 193 assertions.
 
 Two heavier tools sit alongside the suite and are deliberately *not* part of
 `runAll()` — one makes live DataStore calls, the other runs a simulation:
@@ -241,7 +242,13 @@ never returns `nil` from a cancelled transform.
   concurrency is not.
 - **`BindToClose` under a real shutdown.** Verified via stopping Play, which
   fires the same path, but not against an actual server shutdown with the 30
-  second budget Roblox allows.
+  second budget Roblox allows. Stopping Play did find a real bug here:
+  `PlayerRemoving` fires an instant before `BindToClose`, the handler saw the
+  leaving player's save already in flight, counted nothing left to do, and let
+  the server close on top of the write. Whether the write survived was a race:
+  of four stops tested before the fix, one lost the final save and left the
+  session lock behind. It now waits for the sessions table to empty instead; a
+  traced stop shows the server held open until the save returns.
 - **No human playthrough.** The §7 balance targets are *modelled*, not played —
   see the measured table and its caveats in BALANCE.md. The model now scales
   travel time with depth, which turned out to change the milestones by less than

@@ -27,6 +27,7 @@
 	  the 60 FPS / 20 player target and not.
 ]]
 
+local CollectionService = game:GetService("CollectionService")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Workspace = game:GetService("Workspace")
@@ -34,12 +35,16 @@ local Workspace = game:GetService("Workspace")
 local GameConfig = require(ReplicatedStorage.Shared.Config.GameConfig)
 local LayerConfig = require(ReplicatedStorage.Shared.Config.LayerConfig)
 local OreConfig = require(ReplicatedStorage.Shared.Config.OreConfig)
+local HubDecor = require(script.Parent.Parent.World.HubDecor)
 local Rarity = require(ReplicatedStorage.Shared.Modules.Rarity)
+local RemoteRegistry = require(ReplicatedStorage.Shared.Remotes.RemoteRegistry)
 local Signal = require(ReplicatedStorage.Shared.Modules.Signal)
 local Trove = require(ReplicatedStorage.Shared.Modules.Trove)
 
 local MineService = {}
 MineService.Name = "MineService"
+
+local PANEL_PAD_TAG = GameConfig.PanelPadTag
 
 local BLOCK = GameConfig.BlockSize
 local CHUNK = GameConfig.ChunkBlocks
@@ -211,7 +216,7 @@ local function createPart(): BasePart
 	part.CastShadow = false
 	part.TopSurface = Enum.SurfaceType.Smooth
 	part.BottomSurface = Enum.SurfaceType.Smooth
-	part.Material = Enum.Material.Slate
+	part.Material = GameConfig.MineBlockMaterial
 	return part
 end
 
@@ -344,10 +349,20 @@ end
 	looks identical every time it streams in, and skipped entirely for faces
 	buried in rock.
 ]]
-local function applyPatches(part: BasePart, gx: number, gy: number, gz: number, material: Enum.Material, base: Color3)
+--[[
+	Raised tiles on the exposed faces.
+
+	`look` describes the tiles rather than the block, because on an ore block
+	they are not the same thing: the body is flat rock-coloured plastic and the
+	tiles are Neon flecks of the ore. Passing the body's material and colour and
+	deriving the rest here would have put that decision in two places.
+]]
+type PatchLook = { material: Enum.Material, colour: Color3, count: number, glow: boolean }
+
+local function applyPatches(part: BasePart, gx: number, gy: number, gz: number, look: PatchLook)
 	releasePatches(part)
 
-	if GameConfig.PixelTilesPerBlock <= 0 then
+	if look.count <= 0 then
 		return
 	end
 
@@ -368,7 +383,7 @@ local function applyPatches(part: BasePart, gx: number, gy: number, gz: number, 
 
 	local used: { [string]: boolean } = {}
 
-	for index = 1, GameConfig.PixelTilesPerBlock do
+	for index = 1, look.count do
 		local h = patchHash(gx, gy, gz, index)
 		local normal = exposed[(h % #exposed) + 1]
 
@@ -396,8 +411,19 @@ local function applyPatches(part: BasePart, gx: number, gy: number, gz: number, 
 				+ normal * (BLOCK / 2 + relief / 2)
 				+ tangentA * offsetA
 				+ tangentB * offsetB
-			patch.Material = material
-			patch.Color = quantize(base, (shadeOf(gx, gy, gz) + GameConfig.PixelTileShadeOffset + index) % GameConfig.PaletteShades)
+			patch.Material = look.material
+			--[[
+				A fleck is one flat colour, not a step on the block's ramp. Ramping
+				a Neon colour does nothing useful -- Neon ignores shading, so the
+				steps would be invisible -- and a vein reads better as one bright
+				hue anyway.
+			]]
+			patch.Color = if look.glow
+				then look.colour
+				else quantize(
+					look.colour,
+					(shadeOf(gx, gy, gz) + GameConfig.PixelTileShadeOffset + index) % GameConfig.PaletteShades
+				)
 			patch.Parent = part
 		end
 	end
@@ -429,17 +455,13 @@ local function applyAppearance(
 
 	local material, base, reflectance
 	if isFiller then
-		if topExposed and layer.topMaterial then
-			material = layer.topMaterial
-			base = layer.topColor or layer.baseColor
-		else
-			material = layer.material
-			base = layer.baseColor
-		end
+		base = if topExposed and layer.topColor then layer.topColor else layer.baseColor
+		-- Flat, not the layer's granular material: see GameConfig.MineBlockMaterial.
+		-- Roblox shades a grained surface for realism, which is the same grey-ward
+		-- drag `cartoonify` exists to undo, and the material was winning.
+		material = GameConfig.MineBlockMaterial
 		reflectance = 0
 	else
-		-- Ore veins are metallic and reflective against the matte rock, scaled
-		-- by rarity, so something valuable is obvious without a UI marker.
 		material = ore.material or GameConfig.OreMaterial
 		base = ore.color
 		reflectance = GameConfig.OreReflectance[ore.rarity] or 0
@@ -458,7 +480,30 @@ local function applyAppearance(
 	part.Reflectance = reflectance
 
 	if rebuildTiles then
-		applyPatches(part, gx, gy, gz, material, base)
+		--[[
+			Ore gets more flecks and they glow; filler gets the usual couple in a
+			neighbouring step of its own ramp.
+
+			The fleck colour is the ore pushed toward white rather than the ore
+			itself. Neon renders a colour at roughly its own brightness, so a deep
+			ore -- Obsidian, Voidstone -- would glow dark, which is nothing. Lifted
+			first, they all read as light.
+		]]
+		if isFiller then
+			applyPatches(part, gx, gy, gz, {
+				material = material,
+				colour = base,
+				count = GameConfig.PixelTilesPerBlock,
+				glow = false,
+			})
+		else
+			applyPatches(part, gx, gy, gz, {
+				material = Enum.Material.Neon,
+				colour = base:Lerp(Color3.new(1, 1, 1), GameConfig.OreFleckBrighten),
+				count = GameConfig.OrePixelTiles,
+				glow = true,
+			})
+		end
 	end
 end
 
@@ -1186,15 +1231,123 @@ local function buildPlazaFurniture(): number
 		box("PlazaLampCap", Vector3.new(4.2, 1, 4.2), CFrame.new(x, h + 3.6, z), pal.post)
 	end
 
+	--[[
+		How crowded a spot is by the shops, as a fraction of the clearance the
+		nearest one wants: below 1 is too close.
+
+		A ratio rather than a distance because there are two things to stay out
+		of and they want different room -- the building, which wants
+		PlazaLampShopClearance, and the lit circle in front of it, which only
+		wants its own radius plus a margin. Testing the building alone was wrong
+		the moment the circles moved off the shop centres: a lamp could clear the
+		stall by 20 studs and still be standing in the middle of its pad.
+	]]
+	local function shopCrowding(x: number, z: number): number
+		local padRoom = GameConfig.ShopPadDiameter / 2 + 3
+		local worst = math.huge
+
+		for _, layout in GameConfig.ShopLayout do
+			local origin = CFrame.new(layout.position) * CFrame.Angles(0, math.rad(layout.yaw), 0)
+			local pad = origin * layout.padOffset
+			worst = math.min(
+				worst,
+				Vector2.new(x - layout.position.X, z - layout.position.Z).Magnitude
+					/ GameConfig.PlazaLampShopClearance,
+				Vector2.new(x - pad.X, z - pad.Z).Magnitude / padRoom
+			)
+		end
+		return worst
+	end
+
+	--[[
+		Shops and lamps compete for the same ground: the ring runs on a fixed
+		inset from the plaza edge and the shops sit on those same flanks.
+
+		A crowded lamp walks *away from the shop crowding it* until it clears.
+		Away from the shop rather than away from the plaza centre: a shop can sit
+		either side of a lamp, and pushing outward regardless drove the lamp at
+		(-46, 21) straight through the sell stall and into the tool shop beyond
+		it, so it cleared neither and was dropped.
+
+		Sliding along the edge is tried first, since that keeps the ring reading
+		as a ring. When the plaza edge cuts that short -- which happens to the
+		corner lamps, with a shop inboard of them and nowhere outboard to go --
+		it falls back to stepping in toward the middle of the square. Only a lamp
+		that can do neither is dropped.
+	]]
+	local function clears(x: number, z: number): boolean
+		return shopCrowding(x, z) >= 1
+	end
+
+	local function slide(x: number, z: number, dx: number, dz: number): (number, number, boolean)
+		local step = GameConfig.PlazaLampNudge
+		for _ = 1, 40 do
+			x += dx * step
+			z += dz * step
+			if x < minX + 3 or x > maxX - 3 or z < minZ + 3 or z > maxZ - 3 then
+				return x, z, false
+			end
+			if clears(x, z) then
+				return x, z, true
+			end
+		end
+		return x, z, false
+	end
+
+	local function placeLamp(x: number, z: number)
+		if clears(x, z) then
+			lamp(x, z)
+			return
+		end
+
+		--[[
+			Which side of the thing crowding us are we on? Step that way.
+
+			The crowding thing may be a building or a circle, so this weighs both
+			the same way `shopCrowding` does. Picking the nearest building alone
+			would send a lamp crowded by a pad off in whichever direction that
+			pad's shop happened to sit.
+		]]
+		local padRoom = GameConfig.ShopPadDiameter / 2 + 3
+		local nearestX, best = x, math.huge
+		for _, layout in GameConfig.ShopLayout do
+			local origin = CFrame.new(layout.position) * CFrame.Angles(0, math.rad(layout.yaw), 0)
+			local pad = origin * layout.padOffset
+
+			local toShop = Vector2.new(x - layout.position.X, z - layout.position.Z).Magnitude
+				/ GameConfig.PlazaLampShopClearance
+			if toShop < best then
+				best, nearestX = toShop, layout.position.X
+			end
+
+			local toPad = Vector2.new(x - pad.X, z - pad.Z).Magnitude / padRoom
+			if toPad < best then
+				best, nearestX = toPad, pad.X
+			end
+		end
+
+		local ax, az, okX = slide(x, z, if x >= nearestX then 1 else -1, 0)
+		if okX then
+			lamp(ax, az)
+			return
+		end
+
+		-- Edge cut that short; try stepping in toward the middle of the square.
+		local bx, bz, okZ = slide(x, z, 0, if z > (minZ + maxZ) / 2 then -1 else 1)
+		if okZ then
+			lamp(bx, bz)
+		end
+	end
+
 	local perRow = GameConfig.PlazaLampsPerRow
 	local spanX = (maxX - inset) - (minX + inset)
 	for i = 1, perRow do
 		local x = (minX + inset) + (i - 1) * (spanX / (perRow - 1))
-		lamp(x, minZ + inset)
+		placeLamp(x, minZ + inset)
 		-- Skip the middle of the north row: that column is the spawn pad and the
 		-- walk off the lip.
 		if i ~= math.ceil(perRow / 2) then
-			lamp(x, maxZ - inset)
+			placeLamp(x, maxZ - inset)
 		end
 	end
 
@@ -1230,14 +1383,38 @@ local function buildPlazaFurniture(): number
 end
 
 --[[
-	The two shops, built to the reference: a striped market stall for selling,
-	and a glowing mystery cabinet for the ore-to-brainrot conversion.
+	The three shops around the plaza: a striped market stall for selling, an ore
+	exchange for the ore-to-brainrot conversion (and, on its other tab, placing
+	and selling the brainrots that come out of it), and a tool shop for
+	pickaxes, backpacks, podium slots and layer keys.
 
-	Scenery. RequestSell and RequestConvert already exist and are driven from
-	the UI, so these give those flows somewhere to live in the world rather than
-	a second way to fire them. Wiring a ProximityPrompt to either is a few lines
-	in the owning service, but it is a gameplay decision, not a set-dressing one.
+	Each stands on a lit circle that opens its menu when you walk into it. The
+	menus used to open from HUD buttons that worked anywhere on the map, which
+	left these buildings as pure scenery -- a picture of a shop next to a button
+	that was the actual shop. Now the building is the shop.
+
+	The circles are the whole interaction: no ProximityPrompt, no key to press.
+	See `standingPad` below and UIController's pad watcher.
 ]]
+--[[
+	Scenery on the grass around the mine.
+
+	Last of the hub builders on purpose: it reads everything already standing --
+	wall, plaza, lamps, stalls, pads -- off the built parts to decide where it
+	may not put anything, so it has to run after all of them.
+]]
+local function buildDecor()
+	local folder = Instance.new("Folder")
+	folder.Name = "Decor"
+	folder.Parent = hubFolder
+
+	local minX, maxX, minZ, maxZ = plazaBounds()
+	local placed = HubDecor.build(folder, hubFolder, { minX = minX, maxX = maxX, minZ = minZ, maxZ = maxZ })
+	if placed == 0 then
+		warn("[MineService] lawn decoration placed nothing; check the keep-out margins")
+	end
+end
+
 local function buildShops()
 	local pal = GameConfig.ShopPalette
 	local built = 0
@@ -1258,97 +1435,447 @@ local function buildShops()
 		return part
 	end
 
-	-- The lit circle each shop stands on, as in the reference.
-	local function standingPad(centre)
-		local pad = box(
-			"ShopPad",
-			Vector3.new(0.4, 22, 22),
-			CFrame.new(centre + Vector3.new(0, 0.12, 0)) * CFrame.Angles(0, 0, math.rad(90)),
-			pal.pad,
-			Enum.Material.Neon
+	--[[
+		The heavy outline every floating shop sign carries.
+
+		A UIStroke rather than TextStrokeTransparency: the built-in stroke is a
+		single pixel and disappears against the plaza at any distance, where the
+		reference art's world labels are outlined as thickly as its UI. This is
+		the same treatment Theme.textStroke gives screen text, so a sign reads as
+		belonging to the same game as the panel it opens.
+	]]
+	local function worldLabelStroke(label: TextLabel)
+		local stroke = Instance.new("UIStroke")
+		stroke.Thickness = 2.5
+		stroke.Color = Color3.fromRGB(10, 8, 20)
+		stroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Contextual
+		stroke.LineJoinMode = Enum.LineJoinMode.Round
+		stroke.Parent = label
+	end
+
+	--[[
+		The lit circle in front of each shop, and the thing that opens its menu:
+		step into the circle and the panel appears, step out and it closes.
+
+		Built as concentric discs rather than one flat plate, each a little
+		smaller and a little higher than the one under it, so from above you read
+		a glowing outer ring, a dim band, a glowing inner ring and a dim middle.
+		A single Neon disc was a pancake of flat colour; this is the same idea a
+		lit pad has in any game that uses one.
+
+		The stagger matters as much as the sizes: each disc's top sits above the
+		last, so no two horizontal faces share a plane. Stacking them flush would
+		z-fight across the whole circle.
+
+		Only the outer disc is tagged and carries the panel name. UIController
+		reads the radius off *that* part, so the ring you can see is exactly the
+		trigger -- there is no second, invisible volume to keep in sync with it.
+
+		Cylinders laid flat: the thin axis is X and the quarter turn about Z
+		stands them face-up, which is why the client cannot just take Size.X / 2.
+	]]
+	local function standingPad(key: string, at: CFrame, panel: string, tint: Color3?)
+		local d = GameConfig.ShopPadDiameter
+		local bright = tint or pal.pad
+
+		--[[
+			A solid glowing disc, not a set of rings.
+
+			The reference pad is one filled circle whose rim burns saturated and
+			whose middle washes out almost to white, carrying a grid of small
+			studs. Neon does the washing-out on its own -- it drives a bright
+			colour toward white -- so the two discs are the same hue at different
+			distances from white rather than two different colours.
+
+			Every layer's top sits at its own height. Two flat discs sharing a
+			plane z-fight across their whole face, which is the most visible
+			version of that bug there is.
+		]]
+		local face = bright:Lerp(Color3.new(1, 1, 1), 0.5)
+		local stud = bright:Lerp(Color3.new(1, 1, 1), 0.28)
+
+		local function disc(name: string, size: number, y: number, colour: Color3, transparency: number?): BasePart
+			local part = box(
+				name,
+				Vector3.new(0.4, size, size),
+				at * CFrame.new(0, y, 0) * CFrame.Angles(0, 0, math.rad(90)),
+				colour,
+				Enum.Material.Neon
+			)
+			part.Shape = Enum.PartType.Cylinder
+			part.CanCollide = false
+			if transparency then
+				part.Transparency = transparency
+			end
+			return part
+		end
+
+		--[[
+			The spill of light on the ground outside the rim, in three steps.
+
+			Built rather than left to the engine: Lighting's BloomEffect runs at
+			Threshold 2, which Neon never reaches, so nothing here haloes on its
+			own. Dropping that threshold would give the real thing but is a global
+			change -- every Neon surface in the game would start to glow -- so the
+			pad carries its own.
+
+			Three rings rather than one because a single translucent disc has a
+			hard edge and reads as a second ring rather than as light. Each is
+			wider and fainter than the last, and they overlap, so the annuli
+			compound inward: faintest at the outside, strongest against the rim.
+			Stepped rather than smoothly faded is also what DESIGN.md 2a asks of
+			effects.
+		]]
+		for _, step in { { 6, 0.85 }, { 4, 0.72 }, { 2, 0.55 } } do
+			disc("ShopPadGlow", d + step[1], 0.02 + step[1] * 0.01, bright, step[2])
+		end
+
+		local rim = disc("ShopPad", d, 0.12, bright)
+		rim:SetAttribute("UIPanel", panel)
+		-- Which shop this is, as opposed to which panel it opens: the sell
+		-- stall opens the same Backpack panel the HUD button does, so the panel
+		-- name cannot identify it.
+		rim:SetAttribute(GameConfig.ShopKeyAttribute, key)
+		CollectionService:AddTag(rim, PANEL_PAD_TAG)
+
+		local faceDiameter = d - GameConfig.ShopPadRim * 2
+		disc("ShopPadFace", faceDiameter, 0.26, face)
+
+		--[[
+			The studs, laid on a square grid and clipped to the face.
+
+			Geometry rather than a texture, which is the project's standing
+			constraint and here happens to be what the reference is doing anyway:
+			the pattern is raised, not printed.
+
+			`limit` is where a stud's *edge* may reach, so it takes the stud's
+			radius off the face's -- taking the whole diameter off, as the first
+			pass did, pulled the grid two rings short and left a bare pale band
+			round the outside that the reference does not have.
+		]]
+		local pitch = GameConfig.ShopPadStudPitch
+		local studSize = GameConfig.ShopPadStudSize
+		local limit = faceDiameter / 2 - studSize / 2 - 0.2
+		local reach = math.floor(limit / pitch)
+
+		for ix = -reach, reach do
+			for iz = -reach, reach do
+				local x, z = ix * pitch, iz * pitch
+				if math.sqrt(x * x + z * z) <= limit then
+					local part = box(
+						"ShopPadStud",
+						Vector3.new(0.3, studSize, studSize),
+						at * CFrame.new(x, 0.4, z) * CFrame.Angles(0, 0, math.rad(90)),
+						stud,
+						Enum.Material.Neon
+					)
+					part.Shape = Enum.PartType.Cylinder
+					part.CanCollide = false
+				end
+			end
+		end
+	end
+
+	--[[
+		Every shop is built against an origin CFrame rather than in world axes, so
+		its yaw carries the whole stall -- counter, awning, stock and sign all keep
+		the same relation to the front however the building is turned. Same reason
+		PlotService builds a plot relative to its own origin.
+
+		The pad hangs off that origin too, at the layout's `padOffset`, which is
+		in the shop's *local* frame: it sits in front of the counter rather than
+		under the middle of the building, and turning the shop turns the pad with
+		it. Local, because "in front" is a different world direction for each of
+		them -- the market stalls face along their -Z and the exchange along
+		its -X.
+	]]
+	local function shopAt(key: string, panel: string)
+		local layout = GameConfig.ShopLayout[key]
+		local origin = CFrame.new(layout.position) * CFrame.Angles(0, math.rad(layout.yaw), 0)
+		standingPad(key, origin * CFrame.new(layout.padOffset), panel, layout.padColour)
+
+		return function(name: string, size: Vector3, offset: CFrame, colour: Color3, material: Enum.Material?)
+			return box(name, size, origin * offset, colour, material)
+		end
+	end
+
+	--------------------------------------------------------------------
+	-- The market stalls
+	--------------------------------------------------------------------
+	--[[
+		The shell the sell stall and the tool shop share: four posts, a rail
+		frame, a striped awning with a scalloped valance under its front edge, a
+		counter, and the billboard over the lot.
+
+		Factored because the two are the same building in different colours, and
+		they had drifted into two copies of the same twenty lines -- every change
+		to one had to be remembered for the other, and twice it wasn't.
+
+		`dress` places whatever that shop sells on its counter, which is the only
+		part that genuinely differs. It gets the stall's dimensions rather than
+		closing over them, so the goods move with the counter when the stall is
+		resized instead of hanging off the end of it.
+	]]
+	local function marketStall(
+		place: (string, Vector3, CFrame, Color3, Enum.Material?) -> BasePart,
+		prefix: string,
+		stripe: Color3,
+		labelText: string,
+		labelColour: Color3,
+		dress: ((string, Vector3, CFrame, Color3, Enum.Material?) -> BasePart, number, number, number) -> ()
+	)
+		local w, d = GameConfig.MarketStallWidth, GameConfig.MarketStallDepth
+		local postH = GameConfig.MarketStallPostHeight
+		local awningY = postH + 1.2
+		local awningBottom = awningY - 1.6
+		local frontZ = -(d + 3) / 2
+		local counterZ = -d / 2 + 3
+
+		for _, sx in { -1, 1 } do
+			for _, sz in { -1, 1 } do
+				place(
+					`{prefix}Post`,
+					Vector3.new(2.4, postH, 2.4),
+					CFrame.new(sx * (w / 2 - 1), postH / 2, sz * (d / 2 - 1)),
+					pal.post
+				)
+			end
+		end
+
+		-- Rails tying the posts together, so the frame reads as built rather
+		-- than as four sticks holding up a lid.
+		place(`{prefix}Rail`, Vector3.new(w - 2, 0.8, 0.8), CFrame.new(0, postH * 0.55, d / 2 - 1), pal.post)
+		for _, sx in { -1, 1 } do
+			place(`{prefix}Rail`, Vector3.new(0.8, 0.8, d - 2), CFrame.new(sx * (w / 2 - 1), postH * 0.55, 0), pal.post)
+		end
+
+		local stripes = 8
+		local sw = w / stripes
+		for i = 0, stripes - 1 do
+			local x = -w / 2 + (i + 0.5) * sw
+			local colour = if i % 2 == 0 then stripe else pal.stripeB
+			place(`{prefix}Awning`, Vector3.new(sw, 3.2, d + 3), CFrame.new(x, awningY, 0), colour)
+			-- A scalloped valance hung off the front edge, one tab per stripe,
+			-- carrying the stripe colour down past the awning line.
+			place(
+				`{prefix}Valance`,
+				Vector3.new(sw * 0.72, 1.6, 0.6),
+				CFrame.new(x, awningBottom - 0.8, frontZ + 0.3),
+				colour
+			)
+		end
+
+		place(`{prefix}Counter`, Vector3.new(w - 3, 2, 5), CFrame.new(0, 6.2, counterZ), pal.wood)
+		place(`{prefix}CounterLeg`, Vector3.new(w - 6, 5.2, 2.4), CFrame.new(0, 2.6, counterZ), pal.wood)
+
+		dress(place, w, d, counterZ)
+
+		local anchor = place(`{prefix}Label`, Vector3.new(1, 1, 1), CFrame.new(0, postH + 7, 0), labelColour)
+		anchor.Transparency = 1
+		anchor.CanCollide = false
+
+		local gui = Instance.new("BillboardGui")
+		gui.Size = UDim2.fromOffset(190, 70)
+		gui.AlwaysOnTop = false
+		gui.MaxDistance = 260
+		gui.Parent = anchor
+
+		local text = Instance.new("TextLabel")
+		text.Size = UDim2.fromScale(1, 1)
+		text.BackgroundTransparency = 1
+		text.Font = Enum.Font.GothamBlack
+		text.TextScaled = true
+		text.Text = labelText
+		text.TextColor3 = labelColour
+		text.Parent = gui
+		worldLabelStroke(text)
+	end
+
+	--[[
+		Where a stall's goods go, in terms of its own width.
+
+		`goods` is the offset for anything standing on the counter: at w = 18 the
+		corner posts' inner faces are at 6.8, so w/2 - 6 = 3 leaves room for a
+		5-wide crate or backpack beside it. The first pass used w/4, which was
+		fine at the old 26-wide stall and pushed both straight into the posts once
+		it shrank.
+
+		`floor` is for the one item each stall stands on the ground beside the
+		counter, out of the way of everything on top of it.
+	]]
+	local function goodsOffsets(w: number): (number, number)
+		return w / 2 - 6, w / 2 - 4.5
+	end
+
+	--[[
+		The sell stall: a crate of rough ore on one side of the counter, the coins
+		it pays for it stacked on the other, and sacks on the floor beside them.
+
+		Everything fits under the awning. The counter top is at 7.2 and the awning
+		underside at postH + 1.2 - 1.6 = 12.6, and an earlier pass sized the crate
+		to look right on its own and drove the ore pile straight through the roof.
+
+		A balance stood on the counter here briefly. At this stall size its pans
+		could not clear the ore pile without being pushed off the counter's front
+		edge, so the sacks do the "this place deals in bulk" job instead, from
+		ground level where there is room.
+	]]
+	local function dressSell(place, w: number, _d: number, counterZ: number)
+		local goods, floor = goodsOffsets(w)
+
+		place("StallCrate", Vector3.new(5, 2.8, 4.6), CFrame.new(-goods, 8.6, counterZ), pal.wood)
+		for i, spot in { Vector3.new(-1.2, 0, -0.6), Vector3.new(1, 0.2, 0.5), Vector3.new(-0.1, 1.2, 0) } do
+			place(
+				"StallOre",
+				Vector3.new(1.6, 1.6, 1.6),
+				CFrame.new(-goods + spot.X, 9.5 + spot.Y, counterZ + spot.Z)
+					* CFrame.Angles(math.rad(21 * i), math.rad(27 * i), math.rad(16 * i)),
+				pal.ore
+			)
+		end
+
+		-- Coins are cylinders laid flat: the thin axis is X and the quarter turn
+		-- about Z stands them face-up, the same trick the standing pads use. The
+		-- stall's yaw is about Y, so it does not disturb that. Stacked at exactly
+		-- their own thickness so they touch rather than float.
+		for i = 0, 2 do
+			local coin = place(
+				"StallCoin",
+				Vector3.new(0.5, 3.4, 3.4),
+				CFrame.new(goods, 7.45 + i * 0.5, counterZ) * CFrame.Angles(0, 0, math.rad(90)),
+				pal.coin
+			)
+			coin.Shape = Enum.PartType.Cylinder
+		end
+
+		for i, spot in { Vector3.new(0, 0, 0), Vector3.new(1.2, 0, 1.3), Vector3.new(-0.9, 0, 1.5) } do
+			place(
+				"StallSack",
+				Vector3.new(2.6, 2.4, 2.2),
+				CFrame.new(floor + spot.X, 1.2, 1 + spot.Z) * CFrame.Angles(0, math.rad(23 * i), 0),
+				pal.sack
+			)
+		end
+	end
+
+	--[[
+		The tool shop: a rack of pickaxes behind the counter, a backpack on it,
+		and a barrel of spare handles on the floor beside it.
+
+		Two picks, not three. Three fitted the old 26-wide stall; across an
+		18-wide rack their heads are 4.58 across once tilted, so three of them
+		need 13.7 studs against the 13.6 between the posts -- they overlapped each
+		other and the corner post both.
+
+		The rack sits forward of the back rail rather than on it, and the barrel
+		is on the floor: a barrel deep enough to read as one would sink through
+		the counter top to reach the handles standing out of it.
+	]]
+	local function dressTools(place, w: number, d: number, counterZ: number)
+		local goods, floor = goodsOffsets(w)
+
+		place("ToolPack", Vector3.new(5, 4.2, 3.6), CFrame.new(-goods, 9.3, counterZ), pal.pack)
+		place("ToolPackFlap", Vector3.new(5.2, 1.4, 3.8), CFrame.new(-goods, 11.6, counterZ), pal.packTrim)
+		place("ToolPackStrap", Vector3.new(1.1, 4, 0.5), CFrame.new(-goods, 9.4, counterZ - 1.9), pal.packTrim)
+
+		local rackZ = d / 2 - 2.6
+		place("ToolRack", Vector3.new(w - 6, 9, 1), CFrame.new(0, 8, rackZ), pal.post)
+		for _, sx in { -1, 1 } do
+			-- Handle and head apiece, tilted: geometry, because the project ships
+			-- no meshes.
+			local at = CFrame.new(sx * 3.2, 8, rackZ - 0.7) * CFrame.Angles(0, 0, math.rad(18))
+			place("ToolPickHandle", Vector3.new(0.9, 7, 0.7), at, pal.wood)
+			place("ToolPickHead", Vector3.new(4.4, 1.3, 0.9), at * CFrame.new(0, 3, 0), pal.machineTrim)
+		end
+
+		local barrel = place(
+			"ToolBarrel",
+			Vector3.new(4.4, 4, 4),
+			CFrame.new(floor, 2.2, 1) * CFrame.Angles(0, 0, math.rad(90)),
+			pal.wood
 		)
-		pad.Shape = Enum.PartType.Cylinder
-		pad.CanCollide = false
+		barrel.Shape = Enum.PartType.Cylinder
+		for i = -1, 1 do
+			place(
+				"ToolHandle",
+				Vector3.new(0.6, 5, 0.6),
+				CFrame.new(floor + i * 0.8, 6.9, 1 + i * 0.4)
+					* CFrame.Angles(math.rad(8 * i), 0, math.rad(10 * i)),
+				pal.wood
+			)
+		end
 	end
 
 	--------------------------------------------------------------------
 	-- Sell stall
 	--------------------------------------------------------------------
-	local s = GameConfig.ShopStallPosition
-	standingPad(s)
+	-- The sell stall's circle opens the Bag, which is where selling ore actually
+	-- happens; the stall is the place in the world that flow belongs to.
+	marketStall(shopAt("sell", "inventory"), "Stall", pal.stripeA, "SELL", pal.stripeA, dressSell)
 
-	local stallW, stallD, postH = 26, 17, 13
+	--------------------------------------------------------------------
+	-- Ore exchange stall
+	--------------------------------------------------------------------
+	local exchange = shopAt("convert", "convert")
+
+	local exW, exD, exPostH = 24, 16, 13
 	for _, sx in { -1, 1 } do
 		for _, sz in { -1, 1 } do
-			box(
-				"StallPost",
-				Vector3.new(2.4, postH, 2.4),
-				CFrame.new(s + Vector3.new(sx * (stallW / 2 - 1), postH / 2, sz * (stallD / 2 - 1))),
-				pal.post
+			exchange(
+				"ExchangePost",
+				Vector3.new(2.4, exPostH, 2.4),
+				CFrame.new(sx * (exW / 2 - 1), exPostH / 2, sz * (exD / 2 - 1)),
+				pal.machineTrim
 			)
 		end
 	end
 
-	-- Awning, as alternating stripes across the width.
-	local stripes = 8
-	for i = 0, stripes - 1 do
-		local w = stallW / stripes
-		box(
-			"StallAwning",
-			Vector3.new(w, 3.2, stallD + 3),
-			CFrame.new(s + Vector3.new(-stallW / 2 + (i + 0.5) * w, postH + 1.2, 0)),
-			(i % 2 == 0) and pal.stripeA or pal.stripeB
-		)
-	end
+	exchange("ExchangeCanopy", Vector3.new(exW + 2, 3, exD + 2), CFrame.new(0, exPostH + 1.5, 0), pal.machineBody)
+	-- The neon trim marks the same face as the counter (west), not just an
+	-- arbitrary edge, so the lit side of the roof is the side you approach.
+	exchange(
+		"ExchangeCanopyTrim",
+		Vector3.new(0.6, 0.6, exD + 2),
+		CFrame.new(-exW / 2 - 1, exPostH - 0.1, 0),
+		pal.machineGlow,
+		Enum.Material.Neon
+	)
 
-	-- Counter on the south side, which is the way a player crosses the plaza
-	-- from the back pair of bases.
-	box("StallCounter", Vector3.new(stallW - 3, 2, 5), CFrame.new(s + Vector3.new(0, 6.2, -stallD / 2 + 3)), pal.wood)
-	box("StallCounterLeg", Vector3.new(stallW - 6, 5.2, 2.4), CFrame.new(s + Vector3.new(0, 2.6, -stallD / 2 + 3)), pal.wood)
+	--[[
+		Counter on the west side, the way the old cabinet's screen already faced
+		-- onto the walk from the sell stall and the bases, rather than the
+		shaft.
 
-	local sellAnchor = box("SellLabel", Vector3.new(1, 1, 1), CFrame.new(s + Vector3.new(0, postH + 7, 0)), pal.stripeA)
-	sellAnchor.Transparency = 1
-	sellAnchor.CanCollide = false
+		The sell stall's counter runs across its open front, perpendicular to
+		its corner posts, so the two never meet. This one runs along the same
+		wall its posts stand on, so its length has to stop short of them
+		instead: exD - 6 keeps its ends inside the posts at +-(exD/2 - 1) with
+		a clear gap, where exD - 3 (the sell stall's own margin, sized for the
+		perpendicular case) still overlapped them.
+	]]
+	exchange("ExchangeCounter", Vector3.new(5, 2, exD - 6), CFrame.new(-exW / 2 + 3, 6.2, 0), pal.machineBody)
+	exchange(
+		"ExchangeCounterLeg",
+		Vector3.new(2.4, 5.2, exD - 6),
+		CFrame.new(-exW / 2 + 3, 2.6, 0),
+		pal.machineTrim
+	)
 
-	local sellGui = Instance.new("BillboardGui")
-	sellGui.Size = UDim2.fromOffset(190, 70)
-	sellGui.AlwaysOnTop = false
-	sellGui.MaxDistance = 260
-	sellGui.Parent = sellAnchor
-
-	local sellText = Instance.new("TextLabel")
-	sellText.Size = UDim2.fromScale(1, 1)
-	sellText.BackgroundTransparency = 1
-	sellText.Font = Enum.Font.GothamBlack
-	sellText.TextScaled = true
-	sellText.Text = "SELL"
-	sellText.TextColor3 = pal.stripeA
-	sellText.TextStrokeTransparency = 0.2
-	sellText.Parent = sellGui
-
-	--------------------------------------------------------------------
-	-- Conversion cabinet
-	--------------------------------------------------------------------
-	local c = GameConfig.ShopConverterPosition
-	standingPad(c)
-
-	box("ConverterBase", Vector3.new(18, 2.5, 13), CFrame.new(c + Vector3.new(0, 1.25, 0)), pal.machineBody)
-	box("ConverterBody", Vector3.new(15, 17, 10), CFrame.new(c + Vector3.new(0, 11, 0)), pal.machineBody)
-	box("ConverterTrim", Vector3.new(16.5, 3, 11), CFrame.new(c + Vector3.new(0, 20.5, 0)), pal.machineTrim)
-
-	-- Screen faces west, onto the walk.
-	box("ConverterFrame", Vector3.new(1, 12, 12), CFrame.new(c + Vector3.new(-7.6, 12, 0)), pal.machineTrim)
-	local screen = box(
-		"ConverterScreen",
-		Vector3.new(0.6, 9, 9),
-		CFrame.new(c + Vector3.new(-8.3, 12, 0)),
+	-- The "?" screen, sized to the counter rather than to loom over it -- the
+	-- old 9x9 panel on a standalone cabinet read as a monolith next to a
+	-- player, not a shop. It stands on the counter (top at 7.2) rather than
+	-- into it, clear of the canopy (underside at 13) above.
+	local screen = exchange(
+		"ExchangeScreen",
+		Vector3.new(0.6, 4, 4),
+		CFrame.new(-exW / 2 + 5.4, 10, 0),
 		pal.machineGlow,
 		Enum.Material.Neon
 	)
 
 	local screenGui = Instance.new("SurfaceGui")
 	screenGui.Face = Enum.NormalId.Left
-	screenGui.CanvasSize = Vector2.new(220, 220)
+	screenGui.CanvasSize = Vector2.new(140, 140)
 	screenGui.LightInfluence = 0
 	screenGui.Parent = screen
 
@@ -1361,9 +1888,66 @@ local function buildShops()
 	mark.TextColor3 = Color3.fromRGB(255, 255, 255)
 	mark.Parent = screenGui
 
-	for _, sx in { -1, 1 } do
-		box("ConverterPipe", Vector3.new(1.2, 7, 1.2), CFrame.new(c + Vector3.new(sx * 5, 25, -2)), pal.post)
+	--[[
+		A hopper on the roof, widening upward: this is the machine you feed ore
+		into. The canopy tops out at exPostH + 3, so the stack starts there.
+	]]
+	for i = 1, 3 do
+		local w = 5 + (i - 1) * 2.5
+		exchange(
+			"ExchangeHopper",
+			Vector3.new(w, 2, w),
+			CFrame.new(0, exPostH + 4 + (i - 1) * 2, 0),
+			pal.machineTrim
+		)
 	end
+
+	--[[
+		The rarities it can roll, as a row of lit bulbs over the counter, in
+		Rarity.ORDER and using Rarity's own colours -- the same tints the reveal
+		and the plot display cases use, so a Legendary reads as the same colour
+		wherever you meet it.
+
+		Spaced 2.2 apart so the outermost stays inside the corner posts, which
+		start at |z| = exD/2 - 1 - 1.2.
+	]]
+	local bulbs = 5
+	for i = 1, bulbs do
+		exchange(
+			`ExchangeBulb{Rarity.ORDER[i]}`,
+			Vector3.new(1, 1.4, 1.4),
+			CFrame.new(-exW / 2 + 0.2, 12.2, (i - (bulbs + 1) / 2) * 2.2),
+			Rarity.color(Rarity.ORDER[i]),
+			Enum.Material.Neon
+		)
+	end
+
+	-- Higher than the other two stalls' labels, which sit at postH + 7: the
+	-- hopper now occupies that height and would swallow the billboard.
+	local exchangeAnchor = exchange("ExchangeLabel", Vector3.new(1, 1, 1), CFrame.new(0, exPostH + 12, 0), pal.machineGlow)
+	exchangeAnchor.Transparency = 1
+	exchangeAnchor.CanCollide = false
+
+	local exchangeGui = Instance.new("BillboardGui")
+	exchangeGui.Size = UDim2.fromOffset(220, 70)
+	exchangeGui.AlwaysOnTop = false
+	exchangeGui.MaxDistance = 260
+	exchangeGui.Parent = exchangeAnchor
+
+	local exchangeText = Instance.new("TextLabel")
+	exchangeText.Size = UDim2.fromScale(1, 1)
+	exchangeText.BackgroundTransparency = 1
+	exchangeText.Font = Enum.Font.GothamBlack
+	exchangeText.TextScaled = true
+	exchangeText.Text = "CONVERT"
+	exchangeText.TextColor3 = pal.machineGlow
+	exchangeText.Parent = exchangeGui
+	worldLabelStroke(exchangeText)
+
+	--------------------------------------------------------------------
+	-- Tool shop
+	--------------------------------------------------------------------
+	marketStall(shopAt("tools", "shop"), "Tool", pal.toolStripe, "TOOLS", pal.toolStripe, dressTools)
 
 	return built
 end
@@ -1448,6 +2032,7 @@ function MineService.buildPreview(): string
 		buildPlaza()
 		buildPlazaFurniture()
 		buildShops()
+		buildDecor()
 	end)
 
 	hubFolder = previous
@@ -1469,6 +2054,15 @@ function MineService.buildPreview(): string
 		warn(`[MineService] preview: plots skipped ({plotsErr})`)
 	end
 
+	-- Same arrangement for the boards, and the same reason: a convenience for
+	-- Edit must never become a boot-path dependency on a sibling service.
+	local okBoards, boardsErr = pcall(function()
+		require(script.Parent.LeaderboardService).appendPreview(folder)
+	end)
+	if not okBoards then
+		warn(`[MineService] preview: leaderboards skipped ({boardsErr})`)
+	end
+
 	folder.Parent = Workspace
 
 	local parts = 0
@@ -1483,6 +2077,46 @@ end
 -- ==========================================================================
 -- Diagnostics
 -- ==========================================================================
+
+--[[
+	Returns the character to the hub.
+
+	The mine had no way back up: from Magmadeep it was roughly ninety seconds of
+	jumping, which is not a challenge, it is a walk. Now that ore can only be
+	sold at the stall, that walk is on the critical path of the loop and had to
+	go.
+
+	PivotTo rather than setting the root's CFrame, so the whole assembly moves
+	together -- a tool welded to the hand stays welded. Velocity is cleared
+	first, or a player who was falling arrives at the hub still falling and
+	punches straight through the floor.
+]]
+function MineService.returnToSurface(player: Player): boolean
+	local character = player.Character
+	if not character or not character.Parent then
+		return false
+	end
+
+	local root = character:FindFirstChild("HumanoidRootPart")
+	if not root or not root:IsA("BasePart") then
+		return false
+	end
+
+	local humanoid = character:FindFirstChildOfClass("Humanoid")
+	if humanoid and humanoid.Health <= 0 then
+		return false
+	end
+
+	-- Scatter arrivals across the spawn pad. Two players riding up together on
+	-- the same stud shove each other off it.
+	local spread = 3
+	local offset = Vector3.new((math.random() - 0.5) * 2 * spread, 0, (math.random() - 0.5) * 2 * spread)
+
+	root.AssemblyLinearVelocity = Vector3.zero
+	root.AssemblyAngularVelocity = Vector3.zero
+	character:PivotTo(CFrame.new(hubSpawnPosition + offset))
+	return true
+end
 
 function MineService.stats()
 	local activeCount, chunkCount, brokenCount, damagedCount = 0, 0, 0, 0
@@ -1577,11 +2211,23 @@ function MineService.Start()
 	-- and z-fighting. Clear it before anything else builds.
 	MineService.clearPreview()
 
+	local AntiCheatService = require(script.Parent.AntiCheatService)
+	RemoteRegistry.func("RequestSurfaceTeleport").OnServerInvoke = function(player: Player)
+		if not AntiCheatService.guard(player, "RequestSurfaceTeleport") then
+			return { ok = false, reason = "rate_limited" }
+		end
+		if not MineService.returnToSurface(player) then
+			return { ok = false, reason = "no_character" }
+		end
+		return { ok = true }
+	end
+
 	buildHub()
 	buildWall()
 	buildPlaza()
 	buildPlazaFurniture()
 	buildShops()
+	buildDecor()
 	hubFolder.Parent = Workspace
 	mineFolder.Parent = Workspace
 	claimSpawns()

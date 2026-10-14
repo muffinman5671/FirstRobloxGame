@@ -33,6 +33,7 @@
       }
     },
     "Lighting": {
+      "$ignoreUnknownInstances": true,
       "$properties": {
         "Ambient": [
           0.494118,
@@ -43,6 +44,15 @@
         "GlobalShadows": true,
         "Outlines": false,
         "Technology": "Voxel"
+      },
+      "Bloom": {
+        "$className": "BloomEffect",
+        "$properties": {
+          "Enabled": true,
+          "Intensity": 1.2,
+          "Size": 24,
+          "Threshold": 1.2
+        }
       }
     },
     "SoundService": {

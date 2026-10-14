@@ -20,6 +20,7 @@ local Workspace = game:GetService("Workspace")
 local BrainrotConfig = require(ReplicatedStorage.Shared.Config.BrainrotConfig)
 local Format = require(ReplicatedStorage.Shared.Modules.Format)
 local GameConfig = require(ReplicatedStorage.Shared.Config.GameConfig)
+local IndexBonus = require(ReplicatedStorage.Shared.Modules.IndexBonus)
 local ModelFactory = require(ReplicatedStorage.Shared.Modules.ModelFactory)
 local Rarity = require(ReplicatedStorage.Shared.Modules.Rarity)
 local RemoteRegistry = require(ReplicatedStorage.Shared.Remotes.RemoteRegistry)
@@ -45,11 +46,23 @@ PlotService.PlacementChanged = Signal.new()
 
 local trove = Trove.new()
 
+-- One podium: a plinth, a body, a light band and a cap, plus its number plate.
+type Podium = {
+	-- The cap. A brainrot stands on its top face, facing the cap's +Z, and the
+	-- income billboard adorns it.
+	stand: BasePart,
+	-- Everything that ghosts while the slot is locked. The plinth is left out on
+	-- purpose: a locked podium still shows its footprint on the floor.
+	shell: { BasePart },
+	band: BasePart,
+	number: TextLabel,
+}
+
 type Plot = {
 	index: number,
 	model: Model,
 	origin: CFrame,
-	podiums: { BasePart },
+	podiums: { Podium },
 	sign: TextLabel?,
 	owner: Player?,
 	models: { [number]: Model }, -- slot -> spawned brainrot
@@ -78,18 +91,41 @@ local function makePart(name: string, size: Vector3, cf: CFrame, color: Color3, 
 	return part
 end
 
--- Podium n sits in a PodiumsPerRow grid on the floor, numbered left to right,
--- front to back, so slot 1 is always the nearest-left podium.
-local function podiumOffset(slot: number): Vector3
-	local index = slot - 1
-	local col = index % GameConfig.PodiumsPerRow
-	local row = math.floor(index / GameConfig.PodiumsPerRow)
+-- A podium's tiers, bottom to top: plinth, body, cap. The light band sits at the
+-- top of the body, directly under the cap. The body takes whatever height is
+-- left of GameConfig.PodiumSize.Y, so the standing surface stays where config
+-- puts it.
+local PLINTH_HEIGHT = 0.8
+local CAP_HEIGHT = 0.5
+local BAND_HEIGHT = 0.3
 
-	local rows = math.ceil(GameConfig.MaxPlotSlots / GameConfig.PodiumsPerRow)
-	local x = (col - (GameConfig.PodiumsPerRow - 1) / 2) * GameConfig.PodiumSpacing
-	local z = (row - (rows - 1) / 2) * GameConfig.PodiumSpacing
+-- How see-through a locked podium's body and cap are: enough to read as "not
+-- yet", while the plinth under them stays solid.
+local LOCKED_TRANSPARENCY = 0.74
 
-	return Vector3.new(x, GameConfig.PodiumSize.Y / 2, z)
+--[[
+	Sets how one podium looks: locked, open, or holding something.
+
+	The light band is the only part that carries state in colour. Open and empty
+	it is the plot's white. Occupied, it takes the rarity colour of what is
+	standing there -- so the room can be read from the door, which podiums are
+	live and roughly what is on them, before any billboard is legible.
+
+	Neon on the band and nowhere else. Neon has no intensity control, so it
+	belongs on the thin foreground feature, never on the body.
+]]
+local function stylePodium(podium: Podium, active: boolean, glow: Color3?)
+	local pal = GameConfig.PlotPalette
+
+	for _, part in podium.shell do
+		part.Transparency = if active then 0 else LOCKED_TRANSPARENCY
+	end
+
+	podium.band.Transparency = if active then 0 else LOCKED_TRANSPARENCY
+	podium.band.Material = if active then Enum.Material.Neon else Enum.Material.Concrete
+	podium.band.Color = if active then glow or pal.light else pal.frameDark
+
+	podium.number.TextColor3 = if active then pal.accentMetal else pal.mullion
 end
 
 --[[
@@ -364,9 +400,9 @@ local function buildPlot(index: number): Plot
 		Five cases, not six: the reference shows a five-case run, and Mythic reads
 		better as the thing the cases do not promise you.
 
-		They occupy the 4 studs between the wall's inner face and the rear podium
-		row, held at PlotDisplayCaseY -- above a brainrot standing on that row --
-		so they cost no slot.
+		They hang on the wall above the display counter, behind the stage, held
+		at PlotDisplayCaseY so most of each case shows over the heads of the
+		brainrots standing in front of it.
 	]]
 	local caseSize = GameConfig.PlotDisplayCaseSize
 	local caseY = GameConfig.PlotDisplayCaseY
@@ -501,10 +537,118 @@ local function buildPlot(index: number): Plot
 		)
 	end
 
-	local podiums: { BasePart } = {}
-	for slot = 1, GameConfig.MaxPlotSlots do
-		local podium = place(`Podium{slot}`, GameConfig.PodiumSize, CFrame.new(podiumOffset(slot)), pal.podium)
-		podium:SetAttribute("Slot", slot)
+	--[[
+		The showroom floor: a runner from the door to the stage, the stage the
+		back row stands on, and the podiums. GameConfig.PodiumLayout says where
+		each podium goes and which way it faces.
+
+		Whatever rests on something sinks SINK into it rather than sitting
+		exactly on its top face. Two faces on one plane are harmless while one
+		hides the other, but nothing here has to depend on that staying true.
+	]]
+	local SINK = 0.2
+	local floorTop = GameConfig.PlotFloorRaise
+
+	local stageH = GameConfig.PodiumStageHeight
+	local stageFront = GameConfig.PodiumStageFrontZ
+	local stageBack = wallInner + counterD - 0.5 -- runs half a stud under the display counter
+	local stageDepth = stageFront - stageBack
+	place(
+		"Stage",
+		Vector3.new(GameConfig.PodiumStageWidth, stageH + SINK, stageDepth),
+		CFrame.new(0, floorTop + (stageH - SINK) / 2, stageBack + stageDepth / 2),
+		pal.kerb
+	)
+	-- A lit lip along the stage's front edge: the same detail the display
+	-- counter behind it carries, so the two read as one piece of furniture.
+	place(
+		"StageLip",
+		Vector3.new(GameConfig.PodiumStageWidth, 0.3, 0.3),
+		CFrame.new(0, floorTop + stageH - 0.15, stageFront + 0.15),
+		pal.light,
+		{ Material = Enum.Material.Neon }
+	)
+
+	-- The runner is a rise of a few hundredths: enough to be its own surface,
+	-- not enough to be a step. Its trim lines stand a hair prouder again.
+	local runnerRise, trimRise = 0.12, 0.16
+	local runnerW = GameConfig.PodiumRunnerWidth
+	local runnerLength = halfD - stageFront
+	local runnerZ = stageFront + runnerLength / 2
+	place(
+		"Runner",
+		Vector3.new(runnerW, runnerRise + SINK, runnerLength),
+		CFrame.new(0, floorTop + (runnerRise - SINK) / 2, runnerZ),
+		pal.frame
+	)
+	for _, sx in { -1, 1 } do
+		place(
+			"RunnerTrim",
+			Vector3.new(0.6, trimRise + SINK, runnerLength),
+			CFrame.new(sx * (runnerW / 2 - 0.9), floorTop + (trimRise - SINK) / 2, runnerZ),
+			pal.accentMetal
+		)
+	end
+
+	local size = GameConfig.PodiumSize
+	local overhang = GameConfig.PodiumPlinthOverhang
+	local bodyH = size.Y - PLINTH_HEIGHT - CAP_HEIGHT
+	local bodyW, bodyD = size.X - 1, size.Z - 1
+
+	local podiums: { Podium } = {}
+	for slot, spot in GameConfig.PodiumLayout do
+		local ground = floorTop + (if spot.stage then stageH else 0)
+		local base = CFrame.new(spot.position.X, ground, spot.position.Z) * CFrame.Angles(0, math.rad(spot.yaw), 0)
+
+		place(
+			`Podium{slot}Plinth`,
+			Vector3.new(size.X + overhang * 2, PLINTH_HEIGHT + SINK, size.Z + overhang * 2),
+			base * CFrame.new(0, (PLINTH_HEIGHT - SINK) / 2, 0),
+			pal.frameDark
+		)
+		local body = place(
+			`Podium{slot}Body`,
+			Vector3.new(bodyW, bodyH, bodyD),
+			base * CFrame.new(0, PLINTH_HEIGHT + bodyH / 2, 0),
+			pal.podium
+		)
+		--[[
+			Wider than the cap it sits under, so it shows as a lit rim round the
+			podium's top edge from above and as a line under the cap from the
+			side.
+
+			The cap is dark for the same reason. First built in the plot's light
+			metal, it vanished into the pale floor when seen from the door, and
+			the band beside it was white on white. A dark top is what the rim
+			glows against -- and what a brainrot stands out from.
+		]]
+		local band = place(
+			`Podium{slot}Band`,
+			Vector3.new(size.X + 0.4, BAND_HEIGHT, size.Z + 0.4),
+			base * CFrame.new(0, size.Y - CAP_HEIGHT - BAND_HEIGHT / 2, 0),
+			pal.light
+		)
+		local stand = place(
+			`Podium{slot}`,
+			Vector3.new(size.X, CAP_HEIGHT, size.Z),
+			base * CFrame.new(0, size.Y - CAP_HEIGHT / 2, 0),
+			pal.frame
+		)
+		stand:SetAttribute("Slot", slot)
+
+		-- The slot number, on the face the podium presents. The Convert screen
+		-- places by slot number, and until now nothing in the world said which
+		-- podium was which.
+		local plate = place(
+			`Podium{slot}Plate`,
+			Vector3.new(2.6, 1.1, 0.3),
+			base * CFrame.new(0, PLINTH_HEIGHT + bodyH / 2 - 0.1, bodyD / 2 + 0.1),
+			pal.sign
+		)
+		local number = label(plate, tostring(slot), pal.accentMetal, Vector2.new(130, 55))
+
+		local podium: Podium = { stand = stand, shell = { body, stand, plate }, band = band, number = number }
+		stylePodium(podium, true)
 		podiums[slot] = podium
 	end
 
@@ -533,7 +677,7 @@ local function clearSlot(plot: Plot, slot: number)
 	end
 end
 
-local function renderSlot(plot: Plot, slot: number, brainrotId: string, mutation: string, rebirths: number)
+local function renderSlot(plot: Plot, slot: number, brainrotId: string, mutation: string, incomeMultiplier: number)
 	clearSlot(plot, slot)
 
 	local model = ModelFactory.create(brainrotId, mutation)
@@ -547,17 +691,20 @@ local function renderSlot(plot: Plot, slot: number, brainrotId: string, mutation
 		return
 	end
 
-	model:PivotTo(podium.CFrame * CFrame.new(0, GameConfig.PodiumSize.Y / 2, 0))
+	-- Onto the cap's top face, turned the way the podium is.
+	local stand = podium.stand
+	model:PivotTo(stand.CFrame * CFrame.new(0, stand.Size.Y / 2, 0))
 	model.Parent = plot.model
 
 	local def = BrainrotConfig.get(brainrotId)
 	if def then
 		local billboard = Instance.new("BillboardGui")
 		billboard.Size = UDim2.fromOffset(190, 52)
-		billboard.StudsOffsetWorldSpace = Vector3.new(0, GameConfig.BrainrotHeight + 1.6, 0)
+		-- Just over the brainrot's head, measured up from the cap's centre.
+		billboard.StudsOffsetWorldSpace = Vector3.new(0, stand.Size.Y / 2 + GameConfig.BrainrotHeight + 0.1, 0)
 		billboard.AlwaysOnTop = false
 		billboard.MaxDistance = 140
-		billboard.Adornee = podium
+		billboard.Adornee = stand
 		billboard.Parent = model
 
 		local name = Instance.new("TextLabel")
@@ -576,10 +723,9 @@ local function renderSlot(plot: Plot, slot: number, brainrotId: string, mutation
 		income.Font = Enum.Font.GothamBold
 		income.TextScaled = true
 		income.TextColor3 = Color3.fromRGB(120, 232, 140)
-		-- Matches what IncomeService actually pays: base x mutation x rebirth.
-		income.Text = Format.rate(
-			BrainrotConfig.incomeFor(brainrotId, mutation) * ToolConfig.rebirthMultiplier(rebirths)
-		)
+		-- Matches what IncomeService actually pays: base x mutation, times the
+		-- rebirth and index multipliers renderPlot hands down.
+		income.Text = Format.rate(BrainrotConfig.incomeFor(brainrotId, mutation) * incomeMultiplier)
 		income.Parent = billboard
 	end
 
@@ -610,18 +756,29 @@ local function renderPlot(plot: Plot)
 		owned[entry.uid] = entry
 	end
 
+	-- The same product IncomeService.rateFor pays out.
+	local incomeMultiplier = ToolConfig.rebirthMultiplier(profile.rebirths)
+		* IndexBonus.multiplier(profile.indexDiscovered)
+
+	-- slot -> the rarity colour of what stands there, for that podium's band.
+	local glow: { [number]: Color3 } = {}
+
 	for _, placed in profile.placedBrainrots do
 		local entry = owned[placed.uid]
 		if entry and placed.slot >= 1 and placed.slot <= profile.plotSlots then
-			renderSlot(plot, placed.slot, entry.brainrotId, entry.mutation, profile.rebirths)
+			renderSlot(plot, placed.slot, entry.brainrotId, entry.mutation, incomeMultiplier)
+
+			local def = BrainrotConfig.get(entry.brainrotId)
+			if def then
+				glow[placed.slot] = Rarity.color(def.rarity)
+			end
 		end
 	end
 
-	-- Podiums beyond the player's purchased slot count are visually inert.
+	-- Podiums past the purchased count are ghosted. The rest light up, in the
+	-- rarity colour of their occupant if they have one.
 	for slot, podium in plot.podiums do
-		local active = slot <= profile.plotSlots
-		podium.Transparency = if active then 0 else 0.72
-		podium.Color = if active then Color3.fromRGB(58, 62, 72) else Color3.fromRGB(42, 44, 52)
+		stylePodium(podium, slot <= profile.plotSlots, glow[slot])
 	end
 end
 
@@ -663,6 +820,11 @@ local function release(player: Player)
 	for slot in plot.models do
 		clearSlot(plot, slot)
 	end
+	-- An unowned plot shows every podium open, lit in the plot's own white.
+	for _, podium in plot.podiums do
+		stylePodium(podium, true)
+	end
+
 	plot.owner = nil
 	if plot.sign then
 		plot.sign.Text = "UNCLAIMED"
@@ -882,6 +1044,24 @@ function PlotService.Start()
 			if plot then
 				renderPlot(plot)
 			end
+		end
+	end)
+
+	-- Each billboard prints what its podium pays, and two things change that
+	-- without any brainrot moving: a rebirth, and a first-ever discovery raising
+	-- the index bonus.
+	EconomyService.Rebirthed:Connect(function(player: Player)
+		local plot = byPlayer[player]
+		if plot then
+			renderPlot(plot)
+		end
+	end)
+
+	local ConversionService = require(script.Parent.ConversionService)
+	ConversionService.Converted:Connect(function(player: Player, _brainrotId: string, _mutation: string, isNew: boolean)
+		local plot = byPlayer[player]
+		if isNew and plot then
+			renderPlot(plot)
 		end
 	end)
 end

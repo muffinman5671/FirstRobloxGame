@@ -50,7 +50,7 @@ local DataService = {}
 DataService.Name = "DataService"
 
 -- Bump when the Profile shape changes, and add a matching MIGRATIONS entry.
-local SCHEMA_VERSION = 1
+local SCHEMA_VERSION = 2
 
 local STORE_NAME = "PlayerProfiles"
 local STORE_SCOPE = "v1"
@@ -108,6 +108,8 @@ local function defaultProfile(): Profile
 		plotSlots = GameConfig.StartingPlotSlots,
 		lastOnlineUnix = 0,
 		playtime = 0,
+		dailyStreak = 0,
+		dailyLastClaimDay = 0,
 	}
 end
 
@@ -119,11 +121,52 @@ end
 	Keep them total: a migration must never assume a field exists.
 ]]
 local MIGRATIONS: { [number]: (Profile) -> Profile } = {
-	-- [1] = function(profile)
-	--     profile.newField = 0
-	--     profile.schemaVersion = 2
-	--     return profile
-	-- end,
+	--[[
+		1 -> 2: the podium cap came down from 24 to 10, and the daily reward
+		fields arrived.
+
+		A profile holding more slots than the cap gets its coins back for each
+		one it loses, and anything standing on a podium that no longer exists
+		goes back into storage -- still owned, just unplaced. The daily fields
+		need no step of their own; reconcile fills them from the defaults.
+
+		The refund is priced with the numbers as they stood under schema 1,
+		written out here rather than read from config. A migration describes the
+		past, and must keep giving the same answer after the config moves on.
+	]]
+	[1] = function(profile)
+		local V2_SLOT_CAP = 10
+		local V1_STARTING_SLOTS, V1_SLOT_BASE_PRICE, V1_COST_GROWTH = 4, 5000, 1.55
+
+		local slots = if type(profile.plotSlots) == "number" then profile.plotSlots else V1_STARTING_SLOTS
+
+		if slots > V2_SLOT_CAP then
+			local refund = 0
+			for held = V2_SLOT_CAP, slots - 1 do
+				-- What the slot bought while holding `held` cost, rounded the way
+				-- the shop rounded it: to two significant figures.
+				local price = V1_SLOT_BASE_PRICE * V1_COST_GROWTH ^ (held - V1_STARTING_SLOTS)
+				local magnitude = 10 ^ (math.floor(math.log10(price)) - 1)
+				refund += math.floor(price / magnitude + 0.5) * magnitude
+			end
+
+			profile.coins = (if type(profile.coins) == "number" then profile.coins else 0) + refund
+			profile.plotSlots = V2_SLOT_CAP
+		end
+
+		if type(profile.placedBrainrots) == "table" then
+			local kept = {}
+			for _, placed in profile.placedBrainrots do
+				if type(placed) == "table" and type(placed.slot) == "number" and placed.slot <= V2_SLOT_CAP then
+					table.insert(kept, placed)
+				end
+			end
+			profile.placedBrainrots = kept
+		end
+
+		profile.schemaVersion = 2
+		return profile
+	end,
 }
 
 -- ==========================================================================
@@ -770,6 +813,8 @@ function DataService.buildSnapshot(player: Player): SharedTypes.ProfileSnapshot?
 		indexDiscovered = deepCopy(profile.indexDiscovered),
 		plotSlots = profile.plotSlots,
 		incomePerSecond = if incomeProvider then incomeProvider(player) else 0,
+		dailyStreak = profile.dailyStreak,
+		dailyLastClaimDay = profile.dailyLastClaimDay,
 	}
 end
 
@@ -855,25 +900,41 @@ function DataService.Start()
 		end
 	end)
 
-	-- Final flush. BindToClose blocks shutdown until every profile is released,
-	-- which is the last chance to clear locks cleanly.
+	--[[
+		Final flush. BindToClose holds the server open until this returns, which
+		is the last chance to get every profile written and its lock cleared.
+
+		It waits for the sessions table to empty, not for the releases it starts
+		itself, and that distinction is the fix for a save that was being lost.
+		When the last player leaves, PlayerRemoving fires first and starts their
+		release; this runs an instant later with that save still in flight.
+		releaseProfile, asked a second time, returns at once because the session
+		is already releasing -- so a count of releases started here reached zero
+		immediately, this returned, and the server closed on top of the write.
+		Sometimes the write had already gone out and landed. Sometimes the last
+		stretch of play was lost and the lock was left behind, which on a live
+		server means the player cannot rejoin until it goes stale.
+
+		A session only leaves the table once its save has returned, so an empty
+		table is the thing actually worth waiting for.
+	]]
 	game:BindToClose(function()
 		if mockStore then
 			return
 		end
 
-		local remaining = 0
+		-- A no-op for anyone PlayerRemoving has already started on.
 		for player in sessions do
-			remaining += 1
-			task.spawn(function()
-				releaseProfile(player)
-				remaining -= 1
-			end)
+			task.spawn(releaseProfile, player)
 		end
 
 		local deadline = os.clock() + 25
-		while remaining > 0 and os.clock() < deadline do
+		while next(sessions) ~= nil and os.clock() < deadline do
 			task.wait(0.1)
+		end
+
+		for player in sessions do
+			warn(`[DataService] shut down before {player.Name}'s final save returned`)
 		end
 	end)
 end

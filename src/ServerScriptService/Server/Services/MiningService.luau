@@ -14,9 +14,10 @@
 	  7. the block's layer is unlocked
 	  8. the ore's rebirth gate is satisfied
 
-	Damage is always pickaxe.power * rebirthMultiplier, read server-side from
-	the profile. The client never sends a damage number, a block id, or an ore
-	id -- only where it swung.
+	Damage is always pickaxe.power * rebirthMultiplier, times
+	GameConfig.CritMultiplier on a critical hit -- all of it read or rolled
+	server-side. The client never sends a damage number, a crit flag, a block
+	id, or an ore id -- only where it swung.
 ]]
 
 local Players = game:GetService("Players")
@@ -36,7 +37,9 @@ local InventoryService
 local MineService
 
 type SwingState = {
-	lastSwingClock: number,
+	-- os.clock() at which the next swing is due. A schedule rather than the
+	-- time of the last swing; the cooldown check in onSwing says why.
+	nextSwingClock: number,
 	windowStart: number,
 	windowCount: number,
 	violations: number,
@@ -44,6 +47,10 @@ type SwingState = {
 }
 
 local swingState: { [Player]: SwingState } = {}
+
+-- Crit rolls. One generator per server rather than one per swing, for the same
+-- reason ConversionService keeps one.
+local rng = Random.new()
 
 -- Sliding window for the rate check, in seconds.
 local RATE_WINDOW = 3
@@ -54,7 +61,7 @@ local function stateFor(player: Player): SwingState
 	local state = swingState[player]
 	if not state then
 		state = {
-			lastSwingClock = 0,
+			nextSwingClock = 0,
 			windowStart = os.clock(),
 			windowCount = 0,
 			violations = 0,
@@ -175,11 +182,27 @@ local function onSwing(player: Player, rawPosition: any)
 		return refuse(player, "rate limited")
 	end
 
-	-- Cooldown, with a tolerance for ping jitter.
+	--[[
+		Cooldown, kept as a schedule rather than as a gap since the last swing.
+
+		The gap version refused anything arriving sooner than 85% of the
+		cooldown after the swing before it. That is a fraction of an interval
+		which shrinks as pickaxes get faster: at 5 swings a second it left 30ms
+		for network jitter, so an ordinary connection dropped real hits -- the
+		swing animates and nothing happens -- while the same 15% let a client
+		that ignored its cooldown mine about 18% faster indefinitely.
+
+		nextSwingClock is when the next swing is due. A swing may land up to
+		SwingJitterSlackSeconds early, but the schedule then advances a full
+		cooldown from where it stood, not from when the swing arrived. An early
+		swing borrows from the one after it, so the long-run rate can never
+		exceed the pickaxe's however the packets bunch.
+	]]
 	local now = os.clock()
-	local cooldown = (1 / pickaxe.swingsPerSecond) * (1 - GameConfig.SwingCooldownTolerance)
-	if now - state.lastSwingClock < cooldown then
-		return refuse(player, "swing cooldown", `{string.format("%.2f", now - state.lastSwingClock)}s < {string.format("%.2f", cooldown)}s`)
+	local cooldown = 1 / pickaxe.swingsPerSecond
+	local early = state.nextSwingClock - now
+	if early > GameConfig.SwingJitterSlackSeconds then
+		return refuse(player, "swing cooldown", `{string.format("%.2f", early)}s early`)
 	end
 
 	local block = MineService.blockAt(position)
@@ -214,14 +237,18 @@ local function onSwing(player: Player, rawPosition: any)
 		return
 	end
 
-	state.lastSwingClock = now
+	state.nextSwingClock = math.max(state.nextSwingClock, now) + cooldown
 
+	local crit = rng:NextNumber() < GameConfig.CritChance
 	local damage = pickaxe.power * ToolConfig.rebirthMultiplier(profile.rebirths)
+	if crit then
+		damage *= GameConfig.CritMultiplier
+	end
 	local result, hit = MineService.damageAt(position, damage)
 
 	if GameConfig.DebugMining then
 		print(
-			`[MiningService] {player.Name} hit {block.oreId} for {damage} -> {result} `
+			`[MiningService] {player.Name} hit {block.oreId} for {damage}{if crit then " (crit)" else ""} -> {result} `
 				.. `({string.format("%.1f", distance)} studs)`
 		)
 	end
@@ -230,8 +257,13 @@ local function onSwing(player: Player, rawPosition: any)
 		return
 	end
 
+	-- Reported for every swing that lands, including the one that breaks the
+	-- block, which goes out with a fraction of 0. The damage number and the
+	-- crit flash answer the swing, not the block's survival.
+	local fraction = if result == "damaged" then hit.hp / hit.maxHp else 0
+	RemoteRegistry.event("BlockDamaged"):FireClient(player, position, fraction, damage, crit)
+
 	if result == "damaged" then
-		RemoteRegistry.event("BlockDamaged"):FireClient(player, position, hit.hp / hit.maxHp)
 		return
 	end
 
@@ -243,9 +275,15 @@ local function onSwing(player: Player, rawPosition: any)
 	RemoteRegistry.event("BlockBroken"):FireAllClients(position, hit.oreId)
 
 	if credited > 0 then
+		local firstFind = profile.indexDiscovered[hit.oreId] ~= true
 		DataService.update(player, function(p)
 			p.indexDiscovered[hit.oreId] = true
 		end)
+
+		-- Once per ore per profile, so twenty toasts over the whole game.
+		if firstFind and ore then
+			RemoteRegistry.event("NotifyToast"):FireClient(player, "discovery", `New ore discovered: {ore.displayName}`)
+		end
 	end
 
 	MineService.BlockBroken:Fire(player, hit.oreId, hit.layerIndex, position)

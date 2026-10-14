@@ -22,6 +22,7 @@ local Workspace = game:GetService("Workspace")
 local GameConfig = require(ReplicatedStorage.Shared.Config.GameConfig)
 local RemoteRegistry = require(ReplicatedStorage.Shared.Remotes.RemoteRegistry)
 local SharedTypes = require(ReplicatedStorage.Shared.Modules.SharedTypes)
+local SwingAnimator = require(script.Parent.Parent.Animation.SwingAnimator)
 local ToolConfig = require(ReplicatedStorage.Shared.Config.ToolConfig)
 local Trove = require(ReplicatedStorage.Shared.Modules.Trove)
 
@@ -120,16 +121,20 @@ local function resolveTarget(): (BasePart?, boolean)
 end
 
 -- ==========================================================================
--- Swing loop
--- ==========================================================================
-
--- ==========================================================================
 -- Target highlight
 -- ==========================================================================
 
 local IN_RANGE = Color3.fromRGB(120, 232, 140)
 local OUT_OF_RANGE = Color3.fromRGB(236, 96, 96)
 
+-- Impact punch on the outline: colour, how long it decays over, and the two
+-- ends of the thickness and surface ramps.
+local FLASH = Color3.fromRGB(255, 252, 226)
+local FLASH_SECONDS = 0.16
+local LINE_REST, LINE_FLASH = 0.035, 0.11
+local SURFACE_REST, SURFACE_FLASH = 0.88, 0.45
+
+local impactClock = -math.huge
 local highlight: SelectionBox? = nil
 
 local function ensureHighlight(): SelectionBox
@@ -139,9 +144,9 @@ local function ensureHighlight(): SelectionBox
 
 	local box = Instance.new("SelectionBox")
 	box.Name = "MiningTarget"
-	box.LineThickness = 0.035
+	box.LineThickness = LINE_REST
 	box.Transparency = 0.15
-	box.SurfaceTransparency = 0.88
+	box.SurfaceTransparency = SURFACE_REST
 	box.Parent = camera
 
 	highlight = box
@@ -153,11 +158,26 @@ local function showTarget(part: BasePart?, inRange: boolean)
 	local box = ensureHighlight()
 	box.Adornee = part
 
-	if part then
-		local color = if inRange then IN_RANGE else OUT_OF_RANGE
-		box.Color3 = color
-		box.SurfaceColor3 = color
+	if not part then
+		return
 	end
+
+	--[[
+		Punch the outline on the frame the head actually lands, then let it
+		decay. The server's BlockDamaged burst is the authoritative feedback,
+		but it arrives a round trip later -- long enough that the hit reads as
+		unconnected to the swing that caused it. This one is timed off the
+		animation, so contact and reaction happen together.
+	]]
+	local since = os.clock() - impactClock
+	local flash = if since < FLASH_SECONDS then 1 - since / FLASH_SECONDS else 0
+	flash *= flash
+
+	local color = if inRange then IN_RANGE else OUT_OF_RANGE
+	box.Color3 = color:Lerp(FLASH, flash)
+	box.SurfaceColor3 = box.Color3
+	box.LineThickness = LINE_REST + (LINE_FLASH - LINE_REST) * flash
+	box.SurfaceTransparency = SURFACE_REST + (SURFACE_FLASH - SURFACE_REST) * flash
 end
 
 -- ==========================================================================
@@ -236,80 +256,6 @@ local function showHealth(part: BasePart?)
 end
 
 -- ==========================================================================
--- Swing animation
--- ==========================================================================
---[[
-	Procedural, not an Animation asset: the project ships no asset IDs, and a
-	Grip tween needs no rig or upload. Three phases -- wind up over the
-	shoulder, a fast strike through the block, then an ease back to rest.
-
-	Local only for now. Other players won't see this swing; replicating it
-	belongs with the rest of the effects work in phase E.
-]]
-
-local BASE_GRIP = CFrame.new(0, -0.8, 0)
-
-local swingStart = -math.huge
-local swingLength = GameConfig.SwingAnimSeconds
-local activeTool: Tool? = nil
-
-local function beginSwing(pickaxe)
-	activeTool = nil
-	local character = player.Character
-	if not character then
-		return
-	end
-
-	for _, item in character:GetChildren() do
-		if item:IsA("Tool") and item:GetAttribute("MiningPickaxe") then
-			activeTool = item
-			break
-		end
-	end
-
-	-- Never let a swing outlast the cooldown, or animations would overlap and
-	-- the pickaxe would appear to stutter at high swing speeds.
-	swingLength = math.min(GameConfig.SwingAnimSeconds, (1 / pickaxe.swingsPerSecond) * 0.9)
-	swingStart = os.clock()
-end
-
-local function updateSwing()
-	local tool = activeTool
-	if not tool or not tool.Parent then
-		return
-	end
-
-	local elapsed = os.clock() - swingStart
-	if elapsed < 0 or elapsed > swingLength then
-		if tool.Grip ~= BASE_GRIP then
-			tool.Grip = BASE_GRIP
-		end
-		return
-	end
-
-	local t = elapsed / swingLength
-	local windup = GameConfig.SwingAnimWindupEnd
-	local strike = GameConfig.SwingAnimStrikeEnd
-
-	local angle: number
-	if t < windup then
-		-- Ease out into the wind up so it feels like a load, not a twitch.
-		local k = t / windup
-		angle = GameConfig.SwingAnimWindupAngle * (1 - (1 - k) * (1 - k))
-	elseif t < strike then
-		-- Linear through the strike: sharp, no cushioning.
-		local k = (t - windup) / (strike - windup)
-		angle = GameConfig.SwingAnimWindupAngle
-			+ (GameConfig.SwingAnimStrikeAngle - GameConfig.SwingAnimWindupAngle) * k
-	else
-		local k = (t - strike) / (1 - strike)
-		angle = GameConfig.SwingAnimStrikeAngle * (1 - k * k)
-	end
-
-	tool.Grip = BASE_GRIP * CFrame.Angles(math.rad(angle), 0, 0)
-end
-
--- ==========================================================================
 -- Swing loop
 -- ==========================================================================
 
@@ -325,8 +271,8 @@ local function step()
 		return
 	end
 
-	updateSwing()
-
+	-- The swing itself poses on its own render bind, one step after the
+	-- Animator, so there is nothing to drive from here.
 	local target, inRange = resolveTarget()
 
 	-- The highlight and health bar update whether or not the button is held, so
@@ -345,7 +291,7 @@ local function step()
 	end
 
 	lastSwingClock = now
-	beginSwing(pickaxe)
+	SwingAnimator.swing(1 / pickaxe.swingsPerSecond)
 	RemoteRegistry.event("RequestSwing"):FireServer(target.Position)
 
 	if GameConfig.DebugMining then
@@ -370,6 +316,7 @@ local toolTrove = trove:Extend()
 local function bindTool(tool: Tool)
 	toolTrove:Clean()
 	equipped = true
+	SwingAnimator.setTool(tool)
 
 	if GameConfig.DebugMining then
 		print(`[MiningController] pickaxe equipped: {tool.Name}`)
@@ -391,12 +338,14 @@ local function bindTool(tool: Tool)
 	toolTrove:Connect(tool.Unequipped, function()
 		holding = false
 		equipped = false
+		SwingAnimator.setTool(nil)
 	end)
 end
 
 local function watchCharacter(character: Model)
 	holding = false
 	equipped = false
+	SwingAnimator.attach(character)
 
 	-- The root may not exist yet on a fresh character; wait off-thread so this
 	-- never blocks the boot sequence.
@@ -426,6 +375,7 @@ local function watchCharacter(character: Model)
 		if child:IsA("Tool") and child:GetAttribute("MiningPickaxe") then
 			holding = false
 			equipped = false
+			SwingAnimator.setTool(nil)
 		end
 	end)
 end
@@ -483,6 +433,11 @@ function MiningController.Start()
 		snapshot = updated
 	end)
 
+	-- Fired the frame the pickaxe head lands, not when the server answers.
+	SwingAnimator.onImpact(function()
+		impactClock = os.clock()
+	end)
+
 	trove:Connect(UserInputService.InputChanged, onInputChanged)
 
 	-- Releasing the button outside the window never fires Deactivated.
@@ -502,14 +457,17 @@ function MiningController.Start()
 	trove:Connect(player.CharacterRemoving, function()
 		holding = false
 		equipped = false
-		activeTool = nil
 		rootPart = nil
+		SwingAnimator.detach()
 		showTarget(nil, false)
 		showHealth(nil)
 	end)
 end
 
 function MiningController.Stop()
+	-- The animator holds a render-step bind of its own, which the trove never
+	-- sees; unbinding it is the whole reason detach exists.
+	SwingAnimator.detach()
 	trove:Clean()
 end
 

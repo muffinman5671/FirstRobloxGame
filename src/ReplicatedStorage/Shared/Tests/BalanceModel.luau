@@ -33,7 +33,9 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local BrainrotConfig = require(ReplicatedStorage.Shared.Config.BrainrotConfig)
 local Conversion = require(ReplicatedStorage.Shared.Modules.Conversion)
+local DailyReward = require(ReplicatedStorage.Shared.Modules.DailyReward)
 local GameConfig = require(ReplicatedStorage.Shared.Config.GameConfig)
+local IndexBonus = require(ReplicatedStorage.Shared.Modules.IndexBonus)
 local LayerConfig = require(ReplicatedStorage.Shared.Config.LayerConfig)
 local OreConfig = require(ReplicatedStorage.Shared.Config.OreConfig)
 local Rarity = require(ReplicatedStorage.Shared.Modules.Rarity)
@@ -163,6 +165,7 @@ type State = {
 	oreCounts: { [string]: number },
 	pityCounter: number,
 	brainrots: { Brainrot },
+	discovered: { [string]: boolean }, -- the index, for IndexBonus
 	placedIncome: number,
 	milestones: { [string]: number? },
 	flatTravel: boolean,
@@ -174,7 +177,9 @@ local function newState(seed: number, flatTravel: boolean, layerFirst: boolean):
 	return {
 		rng = Random.new(seed),
 		elapsed = 0,
-		coins = 0,
+		-- The first daily reward is open the moment a new player joins, and a
+		-- player who can claim it does.
+		coins = DailyReward.rewardFor(1, 0),
 		rebirths = 0,
 		pickaxeTier = 1,
 		backpackTier = 1,
@@ -183,6 +188,7 @@ local function newState(seed: number, flatTravel: boolean, layerFirst: boolean):
 		oreCounts = {},
 		pityCounter = 0,
 		brainrots = {},
+		discovered = {},
 		placedIncome = 0,
 		milestones = {},
 		flatTravel = flatTravel,
@@ -244,7 +250,17 @@ local function secondsToBreak(state: State, ore: any): number
 	local layer = currentLayer(state)
 	local pickaxe = ToolConfig.PICKAXES[state.pickaxeTier]
 	local hp = GameConfig.BlockBaseHp * layer.hpMultiplier * ore.hardness
-	local damage = pickaxe.power * rebirthMultiplier(state)
+
+	--[[
+		Crits are charged at their expected value rather than rolled per swing.
+		Rolling them would draw from the same generator the ore and conversion
+		rolls use, so every seed's whole run would shift and a config change
+		could no longer be told apart from the reshuffle. The cost is that a
+		block needing very few swings is modelled slightly slow: one crit can
+		save a whole swing there, and an average cannot.
+	]]
+	local critFactor = 1 + GameConfig.CritChance * (GameConfig.CritMultiplier - 1)
+	local damage = pickaxe.power * rebirthMultiplier(state) * critFactor
 	local swings = math.ceil(hp / damage)
 	return swings / pickaxe.swingsPerSecond
 end
@@ -318,6 +334,7 @@ local function convertOnce(state: State, oreId: string)
 		mutation = mutation,
 		income = BrainrotConfig.incomeFor(picked.id, mutation),
 	})
+	state.discovered[picked.id] = true
 
 	mark(state, "firstConversion")
 	if Rarity.atLeast(picked.rarity, "Epic") then
@@ -389,7 +406,8 @@ local function restackPodiums(state: State)
 	for index = 1, math.min(state.plotSlots, #state.brainrots) do
 		total += state.brainrots[index].income
 	end
-	state.placedIncome = total * rebirthMultiplier(state)
+	-- The same product IncomeService.rateFor pays out.
+	state.placedIncome = total * rebirthMultiplier(state) * IndexBonus.multiplier(state.discovered)
 end
 
 --[[

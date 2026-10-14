@@ -15,6 +15,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local BrainrotConfig = require(ReplicatedStorage.Shared.Config.BrainrotConfig)
 local GameConfig = require(ReplicatedStorage.Shared.Config.GameConfig)
+local IndexBonus = require(ReplicatedStorage.Shared.Modules.IndexBonus)
 local LayerConfig = require(ReplicatedStorage.Shared.Config.LayerConfig)
 local OreConfig = require(ReplicatedStorage.Shared.Config.OreConfig)
 local Rarity = require(ReplicatedStorage.Shared.Modules.Rarity)
@@ -170,4 +171,66 @@ return function(t)
 		"mutation multiplier is applied to income"
 	)
 	t.equal(BrainrotConfig.incomeFor("not_a_character", "Normal"), 0, "an unknown character earns nothing")
+
+	-- ---------- swing speed and crits ----------
+	t.ok(GameConfig.PickaxeMaxSwingsPerSecond >= GameConfig.PickaxeBaseSwingsPerSecond,
+		"the last pickaxe swings at least as fast as the first")
+	-- A swing may land this early; a slack as long as the shortest cooldown
+	-- would let two swings through at once.
+	t.ok(GameConfig.SwingJitterSlackSeconds < 1 / GameConfig.PickaxeMaxSwingsPerSecond,
+		"jitter slack is shorter than the fastest cooldown")
+	t.ok(GameConfig.CritChance >= 0 and GameConfig.CritChance <= 1, "crit chance is a probability")
+	t.ok(GameConfig.CritMultiplier >= 1, "a crit never does less than a normal hit")
+
+	-- ---------- index bonus ----------
+	t.near(IndexBonus.multiplier({}), 1, 1e-9, "an empty index pays no bonus")
+	t.near(IndexBonus.multiplier(nil), 1, 1e-9, "a missing index pays no bonus")
+
+	-- indexDiscovered also records ore ids; only characters may count.
+	t.near(IndexBonus.multiplier({ [OreConfig.ORES[1].id] = true }), 1, 1e-9, "a discovered ore pays no bonus")
+
+	local first = BrainrotConfig.BRAINROTS[1]
+	t.near(
+		IndexBonus.multiplier({ [first.id] = true }),
+		1 + GameConfig.IndexBonusPerDiscovery,
+		1e-9,
+		"one discovery pays the per-discovery bonus"
+	)
+
+	local commons: { [string]: boolean } = {}
+	for _, def in BrainrotConfig.ofRarity("Common") do
+		commons[def.id] = true
+	end
+	local commonCount = #BrainrotConfig.ofRarity("Common")
+	t.near(
+		IndexBonus.multiplier(commons),
+		1 + commonCount * GameConfig.IndexBonusPerDiscovery + GameConfig.IndexSetBonus.Common,
+		1e-9,
+		"a finished band adds its set bonus"
+	)
+
+	-- One short of the band: the set bonus must not pay early.
+	commons[BrainrotConfig.ofRarity("Common")[1].id] = nil
+	t.near(
+		IndexBonus.multiplier(commons),
+		1 + (commonCount - 1) * GameConfig.IndexBonusPerDiscovery,
+		1e-9,
+		"an unfinished band pays no set bonus"
+	)
+
+	local everything: { [string]: boolean } = {}
+	local maxBonus = BrainrotConfig.COUNT * GameConfig.IndexBonusPerDiscovery
+	local unconfigured = {}
+	for _, def in BrainrotConfig.BRAINROTS do
+		everything[def.id] = true
+	end
+	for _, band in IndexBonus.summarize(everything).bands do
+		if GameConfig.IndexSetBonus[band.rarity] == nil then
+			table.insert(unconfigured, band.rarity)
+		end
+		maxBonus += band.setBonus
+	end
+	t.equal(#unconfigured, 0, "every rarity with characters has a set bonus")
+	t.near(IndexBonus.multiplier(everything), 1 + maxBonus, 1e-9, "a full index pays every bonus exactly once")
+	t.equal(IndexBonus.summarize(everything).found, BrainrotConfig.COUNT, "a full index counts every character")
 end

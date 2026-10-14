@@ -171,11 +171,133 @@ GameConfig.PlazaLampsPerRow = 5
 GameConfig.PlazaLampHeight = 17
 
 --[[
+	A lamp closer than this to a shop's centre is moved outward along the edge
+	until it clears, rather than left crowding the building.
+
+	The lamps ring the plaza on a fixed inset and the shops sit on the same
+	flanks, so the two want the same ground. Moved rather than skipped: a gap in
+	the ring is more noticeable than a lamp four studs further out, and the lamp
+	is still doing its job.
+
+	A radius, not a real footprint test, because the furniture is built before
+	the shops and does not know their dimensions -- so it is deliberately larger
+	than any real footprint and catches "uncomfortably close" as well as
+	"overlapping". The build is checked for actual overlaps afterwards, which is
+	what would catch this being set wrong.
+]]
+GameConfig.PlazaLampShopClearance = 20
+GameConfig.PlazaLampNudge = 4 -- studs per attempt, outward from the plaza centre
+
+--[[
 	Centre monument: a stepped plinth carrying the same crossed-hammer emblem as
 	the plot headers. Geometry only, like everything else here.
 ]]
 GameConfig.PlazaMonumentSteps = 3
 GameConfig.PlazaMonumentBase = 18
+
+--[[
+	Lawn decoration around the mine.
+
+	The three grass regions in the stem -- a corridor either side of the shaft
+	and the apron behind it -- were bare tiled floor with nothing on them but the
+	leaderboards. HubDecor scatters props across them on a jittered grid.
+
+	Deterministic, from DecorSeed: the world is shared, so two servers of the
+	same place should not have different lawns, and a fixed layout is something
+	a screenshot can be compared against.
+]]
+GameConfig.DecorSeed = 20260912
+
+--[[
+	Grid cell, jitter, and the chance a cell is even tried -- one set per pass.
+
+	**Two passes, large props first.** The first attempt used one grid for
+	everything and the result was 15 flower patches to a single tree: a big prop
+	is rejected far more often than a small one, both by its own footprint
+	needing to fit inside the region and by the spacing check, so running them in
+	one pool lets the small props take every contested spot. Placing the trees,
+	boulders and crates first on a coarse grid, then filling the gaps with bushes
+	and flowers on a fine one, puts the eye-catching things where they belong and
+	still fills in around them.
+
+	Jitter stays under half its pass's pitch, or props from neighbouring cells
+	trade places and the grid shows through as a diagonal.
+
+	Note that spacing rejection, not the grid, is what actually caps density: two
+	conifers need about 17 studs between centres. Simulated over the real region
+	bounds, a 24-stud pitch placed four props across the whole hub.
+]]
+GameConfig.DecorLargePitch = 16
+GameConfig.DecorLargeJitter = 6
+GameConfig.DecorLargeDensity = 0.85
+
+GameConfig.DecorSmallPitch = 9
+GameConfig.DecorSmallJitter = 3.5
+GameConfig.DecorSmallDensity = 0.8
+
+--[[
+	Keep-outs, in studs.
+
+	`Shaft` is measured out from the rim and is the one that matters most: the
+	lip is walked, and a tree on it is a tree you fall past. `Wall` keeps props
+	off the retaining wall's inner face, `Spacing` holds two props' own footprint
+	circles apart, and `Clearance` inflates a prop before it is tested against
+	anything already built, so nothing ends up touching a stall or a board.
+]]
+GameConfig.DecorShaftMargin = 10
+GameConfig.DecorWallMargin = 4
+GameConfig.DecorSpacing = 2
+GameConfig.DecorClearance = 3
+
+--[[
+	Relative frequency within a pass. Weights only compete against others in the
+	same tier -- which tier a prop belongs to is a fact about the prop and lives
+	with its radius in HubDecor.
+
+	Trees carry the large pass because they are the silhouette you see from
+	across the hub; crates are rarer because they are a mining detail and read as
+	litter in quantity.
+]]
+GameConfig.DecorWeights = {
+	conifer = 4,
+	broadleaf = 4,
+	boulder = 3,
+	crates = 2,
+	bush = 5,
+	flowers = 3,
+}
+
+--[[
+	Decoration colours, authored rather than derived.
+
+	Not run through `cartoonify` like the ground is: that multiplies saturation
+	by 1.45, which is right for pulling a layer's muted rock toward poster colour
+	and wrong for a colour already picked to look the way it looks.
+]]
+GameConfig.DecorPalette = {
+	bark = Color3.fromRGB(112, 76, 48),
+	barkDark = Color3.fromRGB(88, 58, 36),
+	leafDeep = Color3.fromRGB(38, 122, 62),
+	leafMid = Color3.fromRGB(58, 158, 74),
+	leafLight = Color3.fromRGB(96, 196, 92),
+	stone = Color3.fromRGB(132, 138, 148),
+	stoneDark = Color3.fromRGB(104, 110, 122),
+	stoneLight = Color3.fromRGB(158, 164, 174),
+	crate = Color3.fromRGB(176, 126, 70),
+	crateDark = Color3.fromRGB(126, 86, 46),
+	crateBand = Color3.fromRGB(88, 96, 110),
+	soil = Color3.fromRGB(84, 62, 42),
+}
+
+-- Flower heads, picked one per stem. Bright and few: they are 1.4-stud cubes
+-- and have to read as colour from across the corridor.
+GameConfig.DecorFlowerColors = {
+	Color3.fromRGB(248, 96, 112),
+	Color3.fromRGB(255, 208, 56),
+	Color3.fromRGB(120, 176, 255),
+	Color3.fromRGB(226, 132, 246),
+	Color3.fromRGB(255, 246, 236),
+}
 
 GameConfig.PlazaPalette = {
 	kerb = Color3.fromRGB(120, 128, 140),
@@ -186,30 +308,190 @@ GameConfig.PlazaPalette = {
 }
 
 --[[
-	Shops, standing on the plaza rather than off in the stem beside the shaft.
+	The three shops, moved out of the middle of the plaza and up to the mine
+	mouth, flanking the walk between the square and the shaft.
 
-	Both are scenery for now: the sell and convert flows already exist as
-	RequestSell / RequestConvert and are driven from the UI, so these give them a
-	place in the world rather than a second way to invoke them.
+	Two corridors of lawn run either side of the shaft: from the retaining wall's
+	inner face at x = +-101 to the shaft's edge at x = +-51, so 50 studs each.
+	A stall is 26 wide, which centres at x = +-76 with 12 studs to spare on both
+	sides; +-78 is that, nudged the couple of studs toward where the corridor is
+	actually walked.
 
-	Positions are the centres of their footprints. They flank the middle of the
-	square, and they face the way their geometry already points -- the stall's
-	counter is on its south side, so it meets a player walking up from the back
-	pair of bases, and the cabinet's screen is on its west side, so it faces the
-	square from the east flank.
+	Sell and Tools share the west corridor in a north-south row. Their lit
+	circles are 22 across and must not overlap -- standing in two at once would
+	have one panel opening while the other closes -- so they are 30 apart, which
+	leaves 8 studs of clear ground between the two circles.
+
+	Each faces the way its geometry already points: the two market stalls have
+	their counter on the south side, meeting a player coming up from the square,
+	and the exchange has its counter on the west, facing the shaft walk.
 ]]
-GameConfig.ShopStallPosition = Vector3.new(-56, 0, -22)
-GameConfig.ShopConverterPosition = Vector3.new(58, 0, -22)
+--[[
+	All three back onto the plaza's north edge at Z = 29 -- where the paving
+	meets the grass round the shaft -- in a row facing south into the square.
 
+	Slid west of centre so they sit off the mouth of the mine rather than across
+	it. They do not clear it entirely: the shaft is 102 studs wide (X +-51)
+	against a 200-stud plaza, so the north edge offers only 49 studs of frontage
+	either side, and a pair of stalls 30.9 wide apiece needs 65. Tools is as far
+	west as the paving allows, and Sell still laps the western edge of the
+	opening by ~17 studs, down from 28.5 before the slide. Clearing it completely
+	means giving up either this edge or the pair being side by side.
+
+	Each is placed by where its turned footprint lands, not its centre, so the
+	backs sit ~1.5 studs off the grass line.
+
+	Yaw is degrees about Y, applied the same way PlotLayout's is, and each
+	builder has its own idea of "front":
+
+	  the market stalls (sell, tools) put their counter on local -Z, which a yaw
+	  of t sends to world (-sin t, 0, -cos t)
+	  the exchange puts its counter on local -X, which goes to (-cos t, 0, sin t)
+
+	Both are 18 degrees off square, tilted toward the middle of the square. The
+	market stalls face south-southeast on -18; the exchange needs -72 for the
+	mirrored look, because its front is a different local axis. The two are not
+	interchangeable.
+]]
+--[[
+	The two market stalls' shell size. Both are built from these, so they cannot
+	drift apart.
+
+	18 x 13 is not a taste decision, it is the largest that clears the mine.
+	Turned 18 degrees a stall's footprint measures w*cos18 + (d+3)*sin18 across,
+	and two of them plus a gap have to fit the 49 studs of north edge between the
+	plaza's west corner and the mouth of the shaft at X -51:
+
+	    26 x 17 -> 30.9 each, 64.8 for the pair   (the old size; 16 too wide)
+	    20 x 14 -> 24.3 each, 51.6                (still over)
+	    18 x 13 -> 22.1 each, 47.1                (fits, with ~4 studs to spare)
+
+	Post height stays at 13. Shrinking it too would have squeezed the 5.4 studs
+	of headroom between the counter top and the awning that the goods on the
+	counter are sized to fit in.
+]]
+GameConfig.MarketStallWidth = 18
+GameConfig.MarketStallDepth = 13
+GameConfig.MarketStallPostHeight = 13
+
+--[[
+	The lit circle in front of each shop. 14 across, where it used to be 22:
+	at 22 it was wider than the 18-wide stall standing on it, which is what made
+	it read as a puddle of colour rather than a place to stand. It is also the
+	trigger radius, so 14 means stepping within 7 studs of its centre.
+
+	Shrinking it fixed something else by accident. At 22 the sell and tools
+	circles were 26 apart with 22 studs of radius between them -- a 4-stud gap,
+	the tightest they have been, and they must never touch or one panel opens as
+	the other closes. At 14 that gap is 12.
+]]
+GameConfig.ShopPadDiameter = 14
+
+--[[
+	How the disc is made up, from the reference art: a saturated rim burning
+	round a washed-out middle, with a grid of small raised studs across it.
+
+	`Rim` is how much saturated edge shows around the pale face. `StudPitch` and
+	`StudSize` set the texture -- the studs are geometry rather than a texture
+	map, both because the project ships no asset IDs and because the reference's
+	pattern is genuinely raised.
+
+	Pitch is the expensive one: it costs studs as the square of the radius over
+	it. At 14 across and a pitch of 1.6 that is ~37 studs per pad, ~111 across
+	the three shops, which is nothing beside the mine but would climb fast on a
+	bigger circle.
+]]
+GameConfig.ShopPadRim = 1.4
+GameConfig.ShopPadStudPitch = 1.6
+GameConfig.ShopPadStudSize = 0.9
+
+--[[
+	`padOffset` is in each shop's own frame, so the circle sits in front of the
+	counter rather than under the middle of the building.
+
+	It differs per shop because "in front" is a different local axis for each:
+	the market stalls put their counter on -Z and the exchange on -X, and the
+	exchange's counter is further from its centre than a stall's, so it needs
+	the longer reach. Both land the circle's near edge just past the counter
+	face, which is where a player actually stands to use the shop.
+]]
+GameConfig.ShopLayout = {
+	sell = {
+		position = Vector3.new(-62.5, 0, 17),
+		yaw = -18,
+		padOffset = Vector3.new(0, 0, -14),
+		padColour = Color3.fromRGB(224, 64, 64),
+	},
+	tools = {
+		position = Vector3.new(-88.5, 0, 17),
+		yaw = -18,
+		padOffset = Vector3.new(0, 0, -14),
+		padColour = Color3.fromRGB(248, 180, 44),
+	},
+	convert = {
+		position = Vector3.new(70, 0, 13),
+		yaw = -72,
+		padOffset = Vector3.new(-20, 0, 0),
+		padColour = Color3.fromRGB(96, 216, 255),
+	},
+}
+
+-- CollectionService tag on the shops' standing circles. MineService tags them,
+-- UIController watches for them; it lives here so neither side owns a string
+-- literal the other has to match.
+GameConfig.PanelPadTag = "PanelPad"
+
+-- Attribute on a standing circle naming which shop it belongs to, matching the
+-- ShopLayout keys above. The panel a pad opens is not a reliable identity --
+-- the sell stall opens the same Backpack panel the HUD button does.
+GameConfig.ShopKeyAttribute = "ShopKey"
+
+--[[
+	Slack, in studs, added to the sell circle's own radius before the server
+	will refuse a sale.
+
+	Ore can only be sold at the stall. Both sides measure the same built part --
+	the client greys the Sell buttons out at exactly the circle that opens the
+	panel, so the affordance and the trigger agree. The server allows this much
+	beyond it: a sale fired on the last frame before the player crossed the edge
+	is in flight for a round trip, and refusing that reads as the button being
+	broken rather than as a rule.
+]]
+GameConfig.SellRangeTolerance = 10
+
+-- Depth, in studs below SurfaceY, past which the HUD's return-to-surface button
+-- lights up. Below this the player is already at the hub and the button would
+-- do nothing.
+GameConfig.SurfaceReturnMinDepth = 8
+
+--[[
+	Shop colours, pushed up to the saturation of the reference art: the stalls
+	there are poster-bright, and a muted brown stall beside a bright UI reads as
+	unfinished rather than as restrained.
+
+	`pad` is only the fallback. Each shop's standing circle takes that shop's own
+	accent instead (ShopLayout's `padColour`), the way the reference's yellow
+	stall stands on a yellow circle -- so the circle says which shop it belongs
+	to before you can read the sign.
+]]
 GameConfig.ShopPalette = {
-	stripeA = Color3.fromRGB(206, 62, 62), -- awning red
-	stripeB = Color3.fromRGB(240, 240, 240),
-	wood = Color3.fromRGB(120, 92, 64),
-	post = Color3.fromRGB(88, 78, 70),
-	machineBody = Color3.fromRGB(36, 42, 62),
-	machineTrim = Color3.fromRGB(70, 108, 188),
-	machineGlow = Color3.fromRGB(92, 208, 255),
-	pad = Color3.fromRGB(46, 190, 120), -- the standing circle; Neon washes a paler green to white
+	stripeA = Color3.fromRGB(224, 64, 64), -- awning red
+	stripeB = Color3.fromRGB(248, 248, 244),
+	wood = Color3.fromRGB(152, 106, 62),
+	post = Color3.fromRGB(112, 86, 62),
+	machineBody = Color3.fromRGB(42, 46, 74),
+	machineTrim = Color3.fromRGB(78, 122, 214),
+	machineGlow = Color3.fromRGB(96, 216, 255),
+	pad = Color3.fromRGB(46, 190, 120), -- fallback only; see padColour above
+	toolStripe = Color3.fromRGB(248, 180, 44), -- the tool shop's awning, against the sell stall's red
+
+	-- Each stall carries a little of what it deals in, so you can tell them
+	-- apart from across the plaza without reading the sign.
+	ore = Color3.fromRGB(122, 130, 142), -- rough rock in the sell stall's crate
+	coin = Color3.fromRGB(238, 196, 62), -- what it pays out, stacked on the counter
+	pack = Color3.fromRGB(86, 118, 74), -- the tool shop's backpack canvas
+	packTrim = Color3.fromRGB(58, 46, 36), -- its straps and buckles
+	sack = Color3.fromRGB(178, 152, 104), -- burlap, so the sell stall's sacks are not more crates
 }
 --[[
 	The retaining wall.
@@ -295,7 +577,7 @@ GameConfig.PaletteShades = 4
 
 -- How far the lightest and darkest steps sit from the layer's base colour.
 -- Above ~0.2 the ramp starts to look like lighting rather than palette.
-GameConfig.PaletteShadeRange = 0.14
+GameConfig.PaletteShadeRange = 0.2
 
 -- Extra darkening per crack stage, so damage is visible on the block itself
 -- rather than only in the HUD.
@@ -339,8 +621,8 @@ GameConfig.PixelTileShadeOffset = 1
 
 	Applied to layer colours and ore colours alike, so ore veins stay vivid.
 ]]
-GameConfig.CartoonSaturation = 1.45
-GameConfig.CartoonValueBoost = 1.12
+GameConfig.CartoonSaturation = 1.62
+GameConfig.CartoonValueBoost = 1.2
 
 -- Floor on value, so the darkest layers still read as coloured rather than
 -- collapsing to black under the palette's darker steps.
@@ -380,26 +662,96 @@ GameConfig.OreReflectance = {
 	Mythic = 0.55,
 }
 
--- Material used for any Uncommon-or-better ore block, unless the ore declares
--- its own. Metal catches light against the matte layer materials.
-GameConfig.OreMaterial = Enum.Material.Metal
+--[[
+	Material used for any Uncommon-or-better ore block, unless the ore declares
+	its own.
+
+	This was Metal, which was the wrong instinct: Metal is dark and mirror-like,
+	so a valuable block read as a *dim* block that happened to catch a highlight.
+	The flat body plus glowing flecks below is what makes ore pop -- the colour
+	does the work, and nothing about the body fights it.
+]]
+GameConfig.OreMaterial = Enum.Material.SmoothPlastic
+
+--[[
+	Mine block bodies.
+
+	Every layer used to carry its own granular material -- Sand, Cobblestone,
+	Pebble, Ice, Sandstone, Marble. Roblox lights those for realism, which is
+	exactly the grey-ward drag `cartoonify` exists to fight, so the two were
+	pulling against each other and the material was winning.
+
+	Flat instead, and let colour carry the layer's identity. This is the same
+	move the hub floor and the retaining wall already made, and the reason the
+	surface reads as illustrated while the mine did not. Surface detail is not
+	lost: it comes from the raised pixel tiles below, which is what DESIGN.md 2a
+	asks for anyway.
+]]
+GameConfig.MineBlockMaterial = Enum.Material.SmoothPlastic
+
+--[[
+	Ore flecks.
+
+	An ore block's raised tiles are Neon in a brightened version of the ore's own
+	colour, so a vein glows from inside its rock rather than being a differently
+	coloured cube. With Bloom's threshold at 1.2 these halo, which is what
+	catches the eye from down the shaft.
+
+	Neon on the *tiles*, never on the body: Neon has no intensity control, and a
+	whole Neon block washes to white and turns everything in front of it into a
+	black silhouette. That has already cost this project one rebuild -- glow
+	belongs on the small foreground feature.
+]]
+GameConfig.OrePixelTiles = 4
+GameConfig.OreFleckBrighten = 0.35
 
 -- ==========================================================================
 -- Swing animation and block health bar
 -- ==========================================================================
 
 -- Length of one procedural pickaxe swing, in seconds. Clamped at runtime to
--- stay under the equipped pickaxe's cooldown so swings never overlap.
+-- stay under the equipped pickaxe's cooldown so swings never overlap; at the
+-- fastest tier the swing compresses rather than being dropped. 0.34 leaves the
+-- starter pickaxe (a 0.4s cooldown) a short beat at rest between swings.
 GameConfig.SwingAnimSeconds = 0.34
 
 -- Phase boundaries within that swing, as fractions: wind up, then strike, then
--- recover. Strike is deliberately the shortest for a sharp, weighty hit.
-GameConfig.SwingAnimWindupEnd = 0.35
-GameConfig.SwingAnimStrikeEnd = 0.55
+-- rebound. The strike is deliberately the shortest -- it is the only part meant
+-- to look fast -- and StrikeEnd is also the instant the head lands, so hit
+-- feedback is timed off it rather than off the server's reply.
+GameConfig.SwingAnimWindupEnd = 0.34
+GameConfig.SwingAnimStrikeEnd = 0.52
 
--- Peak angles, in degrees: back over the shoulder, then down through the block.
-GameConfig.SwingAnimWindupAngle = 65
-GameConfig.SwingAnimStrikeAngle = -50
+-- The rebound after contact, as a damped cosine over the remaining time. Decay
+-- is how hard it settles; cycles counts half-turns, so 1.5 lands exactly at
+-- rest after one visible bounce back past it. Raise decay for a deader,
+-- heavier pickaxe, lower it for a springier one.
+GameConfig.SwingAnimReboundDecay = 3.4
+GameConfig.SwingAnimReboundCycles = 1.5
+
+-- Where the pickaxe sits in the hand before any animation is layered on.
+GameConfig.SwingAnimBaseGrip = CFrame.new(0, -0.8, 0)
+
+--[[
+	Wrist. The Grip runs the same swing curve this far behind the arm, so the
+	head trails the hand through the arc and whips past it afterwards instead of
+	moving rigidly with it.
+
+	A fraction of the swing, not seconds, so it scales with pickaxe speed. Keep
+	it well under StrikeEnd - WindupEnd (0.18): at a lag that size the head is
+	still fully wound back on the frame the arm reaches the block, which reads
+	as a broken weld rather than as follow-through. At 0.05 the head is roughly
+	neutral at contact and peaks a moment after -- 33 degrees of trail, about a
+	frame of delay. Peak angles below are in degrees.
+]]
+GameConfig.SwingAnimWristLag = 0.05
+GameConfig.SwingAnimGripPitch = 34
+GameConfig.SwingAnimGripRoll = 12
+
+-- Idle sway between swings: degrees, and radians per second. Small enough to
+-- read as breathing rather than as a second animation.
+GameConfig.SwingAnimIdleSway = 2.5
+GameConfig.SwingAnimIdleRate = 1.7
 
 -- Health bar shown above a block once it has taken damage. Hidden at full HP so
 -- an untouched wall isn't covered in UI.
@@ -429,9 +781,45 @@ GameConfig.BlockPoolPrewarm = 512
 --   BlockBaseHp * LayerDef.hpMultiplier * OreDef.hardness
 GameConfig.BlockBaseHp = 10
 
--- Ore units granted per broken block, before backpack capacity is applied.
+--[[
+	Ore units granted per broken block, before backpack capacity is applied.
+
+	Exactly one. It was 1-2 until swing speed went up by half. Left alone, that
+	change raised ore per minute by the same half and pulled every §7 milestone
+	in with it -- first rebirth modelled at 0.59x of its target. Blocks now break
+	about 1.5x as fast and pay 1/1.5 as much, so ore per minute, and the pacing
+	that hangs off it, is where it was while the mining itself is quicker.
+
+	Raise Max to hand out more ore per block; BALANCE.md's milestone table is
+	where to see what that costs.
+]]
 GameConfig.OreYieldMin = 1
-GameConfig.OreYieldMax = 2
+GameConfig.OreYieldMax = 1
+
+-- ==========================================================================
+-- Critical hits
+-- ==========================================================================
+
+--[[
+	Each accepted swing has CritChance of landing as a critical hit, which
+	multiplies its damage by CritMultiplier. Rolled on the server; the client is
+	only told the outcome so it can show it.
+
+	These are here for feel rather than for power. Every swing otherwise does
+	exactly the same thing, and a number that sometimes jumps is what makes
+	holding the button down worth watching. Expected damage rises by
+	CritChance * (CritMultiplier - 1) -- 10% at these values -- and BalanceModel
+	charges mining time with that folded in.
+]]
+GameConfig.CritChance = 0.1
+GameConfig.CritMultiplier = 2
+
+-- Floating damage numbers above a struck block: seconds on screen, and studs
+-- risen over that time. The pool is how many can be alive at once before the
+-- oldest is recycled; the fastest pickaxe keeps about three in the air.
+GameConfig.HitNumberSeconds = 0.55
+GameConfig.HitNumberRise = 3
+GameConfig.HitNumberPool = 8
 
 -- ==========================================================================
 -- Atmosphere
@@ -513,9 +901,12 @@ GameConfig.AutosaveSeconds = 60
 -- Absorbs client/server position desync without opening up reach hacking.
 GameConfig.ReachTolerance = 6
 
--- Fraction of the nominal swing cooldown a client may undershoot before the
--- swing is rejected. 0.15 tolerates ping jitter; higher invites swing spam.
-GameConfig.SwingCooldownTolerance = 0.15
+-- How early a swing may arrive against its cooldown and still land, in
+-- seconds. Absorbs network jitter. MiningService repays it out of the next
+-- swing's cooldown, so it buys a burst and never a faster sustained rate. An
+-- absolute time rather than a fraction of the cooldown, because jitter does not
+-- shrink when the pickaxe gets faster.
+GameConfig.SwingJitterSlackSeconds = 0.1
 
 -- Sustained swing rate above (pickaxe rate * this) gets logged and throttled.
 GameConfig.SwingRateViolationFactor = 1.5
@@ -596,8 +987,11 @@ GameConfig.MutationWeights = {
 -- Plots and income
 -- ==========================================================================
 
+-- Podiums a new player has, and the most anyone can own. Ten is the whole
+-- showroom: PodiumLayout below places exactly MaxPlotSlots of them, so raising
+-- this means adding entries there, not just changing the number.
 GameConfig.StartingPlotSlots = 4
-GameConfig.MaxPlotSlots = 24
+GameConfig.MaxPlotSlots = 10
 
 -- ==========================================================================
 -- Plot geometry
@@ -676,18 +1070,93 @@ GameConfig.PlotCount = #GameConfig.PlotLayout
 	reached z -1, which after that move was inside the gateway rather than past
 	it, so it stood in the doorway.
 ]]
-GameConfig.LeaderboardCenter = Vector3.new(-72, 0, 70)
-GameConfig.LeaderboardSpacing = 44
-GameConfig.LeaderboardHeight = 14
 --[[
-	Plot size is set by the podium grid it has to hold: PodiumsPerRow (6) at
-	PodiumSpacing (12) spans 60 studs of centres plus a podium, so 68, and the
-	4 rows that hold MaxPlotSlots span 36 plus a podium, so 44. Anything under
-	those pushes podiums through the side walls.
+	One board on each side of the shaft, facing each other across it.
 
-	80 x 56 leaves 6 studs of margin on each axis. Getting smaller again means
-	tightening PodiumSpacing or dropping PodiumsPerRow first -- the walls cannot
-	come in on their own.
+	They used to stand in a row down the west corridor, which meant walking one
+	side of the mine showed you both and the other side showed you neither -- and
+	it left the east corridor with nothing in it at all. Split, each corridor has
+	a landmark, and whichever way you walk round the shaft you pass one.
+
+	Z 70 is level with the middle of the shaft (its lips are 29 and 131), so a
+	38-wide board sits between 51 and 89 with room either end. X +-72 puts each
+	against its own wall, whose inner face is at +-104.
+
+	Yaw turns the cabinet's face inward. A board's SurfaceGui is on its Front,
+	which points down local -Z, so -90 aims it at +X and +90 at -X.
+]]
+GameConfig.LeaderboardPlacements = {
+	coins = { position = Vector3.new(-72, 0, 70), yaw = -90, accent = Color3.fromRGB(96, 232, 138) },
+	rebirths = { position = Vector3.new(72, 0, 70), yaw = 90, accent = Color3.fromRGB(186, 62, 214) },
+}
+
+--[[
+	The dressing round each board: a paved standing area in front, a planter at
+	each front corner, a conifer set back at each end, and two lamp bollards
+	marking where you stand to read it.
+
+	Arranged rather than scattered. The random pass deliberately keeps well clear
+	of the boards, and loosening it would have put a tree in front of the face --
+	the one place nothing may stand. So the surround is placed in the board's own
+	local frame, symmetric about it, with everything either beside the cabinet or
+	low enough to see over.
+
+	The lamp heads take the board's own accent, which is what ties the dressing to
+	the board rather than making it more lawn.
+]]
+GameConfig.BoardSurroundLampSpread = 13
+
+-- Height of the board's *centre*. Raised 14 -> 21 when the boards were given
+-- legs: at 14 the bottom edge sat a stud off the grass, so there was nowhere for
+-- a post to go and the slab read as floating.
+GameConfig.LeaderboardHeight = 21
+
+--[[
+	Leaderboard cabinet, in studs. The face is what the SurfaceGui draws on; the
+	frame is the heavy outline DESIGN.md 2b asks for, built as geometry because
+	this is a world object and 2a wants detail from parts rather than texture.
+]]
+GameConfig.LeaderboardFaceWidth = 38
+GameConfig.LeaderboardFaceHeight = 24
+GameConfig.LeaderboardFrame = 2.2
+GameConfig.LeaderboardPostHeight = 9
+
+--[[
+	Board colours, matching the UI's palette in Theme.luau.
+
+	Duplicated rather than shared because Theme lives in StarterPlayerScripts and
+	a server script cannot require it. Keep the two in step by hand: these are
+	the same values, and a board that drifts off-palette is the one thing in the
+	hub that would look like a different game.
+]]
+GameConfig.BoardPalette = {
+	panel = Color3.fromRGB(40, 33, 66),
+	panelRaised = Color3.fromRGB(54, 45, 84),
+	panelSunken = Color3.fromRGB(28, 23, 48),
+	border = Color3.fromRGB(10, 8, 20),
+	post = Color3.fromRGB(30, 25, 46),
+	text = Color3.fromRGB(244, 242, 255),
+	textDim = Color3.fromRGB(166, 158, 196),
+	coins = Color3.fromRGB(255, 208, 56),
+}
+
+-- Rank badges. Beyond third everyone gets `other`, which is the point of a
+-- podium: three colours, then the field.
+GameConfig.BoardRankColors = {
+	Color3.fromRGB(255, 208, 56),
+	Color3.fromRGB(206, 214, 226),
+	Color3.fromRGB(214, 140, 72),
+}
+GameConfig.BoardRankOther = Color3.fromRGB(84, 74, 118)
+--[[
+	Plot size is set by what the showroom has to hold. PodiumLayout puts a stage
+	of four across the back and three podiums down each side wall, and its
+	numbers are held off these two: shrink the plot and the wall podiums meet
+	the corner pillars before anything else gives.
+
+	80 x 56 was sized for the 6 x 4 grid of 24 podiums this replaced. It is kept
+	because the hub's clearances, the plaza and the retaining wall are all
+	measured off this footprint -- the room simply has more open floor in it.
 ]]
 GameConfig.PlotWidth = 80
 GameConfig.PlotDepth = 56
@@ -719,9 +1188,9 @@ GameConfig.PlotFasciaHeight = 5 -- band under the front roof edge, carrying the 
 
 	Offset is from the plot centre. At 18 the bays are 18 wide and the entrance
 	36, which is the reference's rhythm. They are shallow in Z and pushed to the
-	front edge deliberately: the front podium row's face is at PodiumSpacing *
-	1.5 + PodiumSize.X / 2 = 22, so anything thicker than PlotDepth / 2 - 22 = 6
-	starts eating podium 19-24.
+	front edge deliberately, so the floor behind them stays clear: the front
+	pair of wall podiums stands in the bay between each of these and its corner
+	pillar.
 ]]
 GameConfig.PlotFrontPillarOffsetX = 18
 GameConfig.PlotFrontPillarWidth = 6
@@ -760,12 +1229,14 @@ GameConfig.PlotLampBrightness = 1.8
 	reference shows a five-case run, and Mythic reads better as the thing the
 	cases do not promise you.
 
-	They sit in the 6 studs between the back wall's inner face and the rear
-	podium row, so they cost no slot.
+	They hang on the back wall above the display counter, behind the stage, so
+	they cost no floor.
 ]]
 GameConfig.PlotDisplayCases = 5
 GameConfig.PlotDisplayCaseSize = Vector3.new(13, 9, 3)
-GameConfig.PlotDisplayCaseY = 12.5 -- clear of a brainrot standing on the rear podium row (podium top 3 + BrainrotHeight 6)
+-- Centre height. The cases span 8 to 17; a brainrot on the stage tops out at 10
+-- (stage 1 + podium 3 + BrainrotHeight 6), so most of each case shows over it.
+GameConfig.PlotDisplayCaseY = 12.5
 
 --[[
 	The arched header over the entrance. The project ships no meshes, so a curve
@@ -817,10 +1288,59 @@ GameConfig.PlotPalette = {
 GameConfig.PlotFloorThickness = 4
 GameConfig.PlotFloorRaise = 0.06
 
--- Podiums are laid out in a grid on the plot floor. 6 x 4 holds MaxPlotSlots.
-GameConfig.PodiumsPerRow = 6
+--[[
+	Podiums: ten, arranged as a showroom rather than a grid.
+
+	Four stand on a low stage across the back, under the rarity cases and facing
+	the entrance. Three more run down each side wall, turned to face in across
+	the room. The middle of the floor is left open, with a runner from the door
+	to the stage, so walking in puts everything you own around you instead of in
+	rows you have to walk between.
+
+	The order here is the order slots unlock in, chosen so the room is symmetric
+	at every size: the four starting slots are the stage, and each one bought
+	after that alternates left wall, right wall, working from the stage toward
+	the door.
+
+	`position` is the podium's centre on the plot floor in the plot's own frame,
+	where +Z is the open side. `yaw` turns its front, and a brainrot faces the
+	way its podium does. `stage` stands it on the dais.
+
+	The numbers are held off the built plot, not picked by eye. Wall podiums at
+	x 29 put the plinth's outer edge at 33.5, half a stud inside the corner
+	pillars (34) and 4.5 off the glazing; the front pair end at z 24.5, a stud
+	and a half short of the front bays' glass.
+]]
+GameConfig.PodiumLayout = table.freeze({
+	{ position = Vector3.new(-19.5, 0, -14.5), yaw = 0, stage = true },
+	{ position = Vector3.new(-6.5, 0, -14.5), yaw = 0, stage = true },
+	{ position = Vector3.new(6.5, 0, -14.5), yaw = 0, stage = true },
+	{ position = Vector3.new(19.5, 0, -14.5), yaw = 0, stage = true },
+	{ position = Vector3.new(-29, 0, -1), yaw = 90, stage = false },
+	{ position = Vector3.new(29, 0, -1), yaw = -90, stage = false },
+	{ position = Vector3.new(-29, 0, 9.5), yaw = 90, stage = false },
+	{ position = Vector3.new(29, 0, 9.5), yaw = -90, stage = false },
+	{ position = Vector3.new(-29, 0, 20), yaw = 90, stage = false },
+	{ position = Vector3.new(29, 0, 20), yaw = -90, stage = false },
+})
+assert(#GameConfig.PodiumLayout == GameConfig.MaxPlotSlots, "GameConfig: PodiumLayout must place exactly MaxPlotSlots podiums")
+
+-- A podium's envelope: X and Z are the cap a brainrot stands on, Y is the height
+-- of that standing surface above whatever the podium is built on. The plinth
+-- under it is PodiumPlinthOverhang wider on every side.
 GameConfig.PodiumSize = Vector3.new(8, 3, 8)
-GameConfig.PodiumSpacing = 12
+GameConfig.PodiumPlinthOverhang = 0.5
+
+-- The stage under the back row: how wide it is, how high, and the plot-frame Z
+-- of its front edge. Its back runs under the display counter. One stud is a
+-- step a character walks straight up.
+GameConfig.PodiumStageWidth = 54
+GameConfig.PodiumStageHeight = 1
+GameConfig.PodiumStageFrontZ = -7
+
+-- Width of the runner from the entrance to the stage. Narrower than the
+-- 36-stud doorway on purpose, so it reads as a path through it.
+GameConfig.PodiumRunnerWidth = 14
 
 -- Brainrot models are scaled to roughly this height so a Mythic doesn't
 -- dwarf the plot and a Common isn't invisible.
@@ -849,6 +1369,63 @@ GameConfig.RebirthMultiplierStep = 0.35
 GameConfig.RebirthsForMythicOre = 3
 
 -- ==========================================================================
+-- Index bonus
+-- ==========================================================================
+--[[
+	The collection log pays. Every character discovered adds
+	IndexBonusPerDiscovery to passive income, and finishing a whole rarity band
+	adds that band's IndexSetBonus on top. The parts sum into one bonus that
+	multiplies income alongside the rebirth multiplier; see IndexBonus.luau. It
+	survives rebirth, because the index does.
+
+	Without it the Index was a list with a percentage on it. A new character
+	mattered only if it out-earned whatever was already on a podium, so a
+	first-ever Common and a fifth duplicate of it were the same event.
+
+	Sized so the opening hour barely moves and the long game has something to
+	chase: a dozen early discoveries and the Common set come to about +17%,
+	while the whole index is +151% -- more than four rebirths' worth, behind the
+	two rarest bands, which between them are under half a percent of rolls.
+]]
+GameConfig.IndexBonusPerDiscovery = 0.01
+GameConfig.IndexSetBonus = table.freeze({
+	Common = 0.05,
+	Uncommon = 0.08,
+	Rare = 0.12,
+	Epic = 0.2,
+	Legendary = 0.3,
+	Mythic = 0.5,
+})
+
+-- ==========================================================================
+-- Daily rewards
+-- ==========================================================================
+--[[
+	One reward per UTC day, claimed from the Daily screen. Consecutive days walk
+	down this list; the day after the last entry starts it again, and missing a
+	whole day sends the streak back to the first. The rules are in
+	Shared/Modules/DailyReward.
+
+	Each day pays whichever is larger: the flat `coins`, or `incomeMinutes` of
+	the player's passive income as it stands when they claim. The flat amount is
+	what a new player gets -- day 1 is a little under two starter backpacks of
+	ore -- and the income half is what stops the reward meaning nothing once
+	they are earning thousands a second.
+
+	Minutes, not hours, on purpose. Offline earnings already pay for the time
+	away; this pays for coming back, and it should not be the bigger of the two.
+]]
+GameConfig.DailyRewards = table.freeze({
+	table.freeze({ coins = 250, incomeMinutes = 5 }),
+	table.freeze({ coins = 500, incomeMinutes = 8 }),
+	table.freeze({ coins = 1000, incomeMinutes = 10 }),
+	table.freeze({ coins = 2000, incomeMinutes = 15 }),
+	table.freeze({ coins = 4000, incomeMinutes = 20 }),
+	table.freeze({ coins = 7500, incomeMinutes = 30 }),
+	table.freeze({ coins = 15000, incomeMinutes = 60 }),
+})
+
+-- ==========================================================================
 -- Progression curves
 -- ==========================================================================
 -- ToolConfig generates its tiers from these. The doc's targets: costs ~1.55x
@@ -871,8 +1448,11 @@ GameConfig.PickaxePowerGrowth = 1.45
 GameConfig.PickaxeTiers = 20
 GameConfig.PickaxeBasePower = 3
 GameConfig.PickaxeBasePrice = 500
-GameConfig.PickaxeBaseSwingsPerSecond = 1.6
-GameConfig.PickaxeMaxSwingsPerSecond = 3.2
+-- Swing speed runs linearly from Base at tier 1 to Max at the last tier. These
+-- set how busy mining feels: at 1.6 the starter pickaxe took 2.5s to break the
+-- first block in the game, which is a long time to hold a button for one cube.
+GameConfig.PickaxeBaseSwingsPerSecond = 2.5
+GameConfig.PickaxeMaxSwingsPerSecond = 5
 GameConfig.PickaxeBaseReach = 18
 GameConfig.PickaxeMaxReach = 30
 

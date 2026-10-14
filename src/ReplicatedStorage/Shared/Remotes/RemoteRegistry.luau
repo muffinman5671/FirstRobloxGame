@@ -49,6 +49,8 @@ RemoteRegistry.SPECS = table.freeze({
 	{ name = "RequestEquip", kind = "Function", direction = "Bidirectional" },
 	{ name = "RequestUnlockLayer", kind = "Function", direction = "Bidirectional" },
 	{ name = "RequestRebirth", kind = "Function", direction = "Bidirectional" },
+	{ name = "RequestSurfaceTeleport", kind = "Function", direction = "Bidirectional" },
+	{ name = "RequestClaimDaily", kind = "Function", direction = "Bidirectional" },
 	{ name = "LayerUnlocked", kind = "Event", direction = "ServerToClient" },
 
 	-- ---- Conversion --------------------------------------------------------

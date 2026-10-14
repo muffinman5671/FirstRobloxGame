@@ -59,8 +59,8 @@ makes something smoother, softer, or more rounded, it is the wrong choice.
 3. **Quantized palettes.** Every surface picks from a small per-context ramp
    (3–5 steps) around a base colour. Deterministic per object or per grid
    position, never random per frame.
-4. **Hard edges.** Right angles, no bevels, no rounded corners anywhere —
-   including UI.
+4. **Hard edges.** Right angles, no bevels, no rounded corners — in the world.
+   UI and shopfronts are the exception and are rounded; see §2b.
 5. **No image textures or asset IDs.** Surface detail comes from Roblox's
    built-in materials plus geometry. Sub-block detail is built from more blocks
    — mine blocks carry small raised pixel tiles on their exposed faces. This
@@ -76,9 +76,8 @@ makes something smoother, softer, or more rounded, it is the wrong choice.
   a per-rarity ramp. Mutations shift the ramp (gold, diamond, glitched) rather
   than adding gloss or particles-as-polish.
 - **Hub, plots, and podiums** — concrete slabs and right angles.
-- **UI** — square corners, hard 2px borders, flat fills, no drop shadows, no
-  gradients. This **overrides** §6's "chunky rounded corners": panels are
-  square. Keep the dark slate palette and the saturated per-rarity accent.
+- **UI and shopfronts** — see §2b. These do **not** follow the hard-edge rule:
+  they are chunky, rounded and outlined. Everything else on this list does.
 - **Effects** — stepped, not smooth. Particles are square. Tweens use discrete
   steps or snappy easing rather than long soft fades.
 
@@ -86,6 +85,46 @@ makes something smoother, softer, or more rounded, it is the wrong choice.
 `CrackDarken*` constants in `GameConfig.luau`, plus `material` / `baseColor` /
 `topMaterial` / `topColor` per layer in `LayerConfig.luau`. Anything new that
 renders should read from config the same way rather than hardcoding colours.
+
+## 2b. Art Direction — UI and Shopfronts
+
+The world is brutalist. **The UI is not**, and neither are the things the player
+walks up to and interacts with. Set from reference art the owner supplied; §2a's
+hard-edge rule does not apply here, and this section wins where they disagree.
+
+**The four things that carry it**, in order of how much they matter:
+
+1. **A heavy near-black outline on every shape.** This is the single strongest
+   signal. A panel in the wrong colour with the right outline still reads as
+   belonging; a panel in the right colour without one does not. Drawn with
+   `UIStroke` in `Border` mode so it sits outside the shape and costs no layout.
+2. **Chunky rounded corners.** 14px on panels, 8px on buttons, rows and cards.
+   Nothing in the UI is square.
+3. **Outlined text.** `UIStroke` in `Contextual` mode on labels; the built-in
+   `TextStrokeTransparency` for buttons, which spend their one stroke on the
+   border. `GothamBlack` for anything that is a heading or a number.
+4. **A vertical sheen on every fill** — lighter at the top, deeper at the
+   bottom. Written as a brightness ramp rather than as two colours, so one
+   helper shades a green button, a magenta header and a dark panel alike.
+
+**Rules**
+
+- **Saturated, high-contrast colour.** Deep indigo panels; accents that are
+  properly bright rather than muted. Each screen gets its own header colour.
+- **Everything goes through `Theme.luau`.** Panels, buttons, labels, bars,
+  headers, cards and accent bars all have a constructor. If a frame builds a
+  shape by hand it will drift, which is how the five hand-built title bars this
+  replaced ended up identical-but-separate.
+- **Shopfronts match the UI, not the mine.** A stall's colours are poster-bright,
+  its floating sign is outlined as thickly as a panel, and its standing circle
+  takes that shop's own accent so the circle names the shop before the sign
+  does.
+- **Still no image textures or asset IDs.** Corners, strokes and gradients are
+  all `UICorner` / `UIStroke` / `UIGradient` instances, so §2a rule 5 holds.
+
+**Implementation.** `Theme.COLOR`, `Theme.METRIC` and the constructors in
+`Client/UI/Theme.luau`; `ShopPalette` and `ShopLayout.padColour` in
+`GameConfig.luau`.
 
 ## 3. Project Structure
 
@@ -185,7 +224,7 @@ Ship **6 depth layers** (Topsoil, Stonecore, Ironvein, Crystalis, Magmadeep, The
 
 **ConversionService** — Consumes a configurable ore cost, rolls a weighted table biased by which ore was fed in, applies a pity counter that guarantees an Epic+ every N rolls, rolls a mutation, and grants the brainrot. Fire a client remote that plays a suspense-then-reveal animation scaled to rarity.
 
-**PlotService** — Assign each joining player an unclaimed base plot. Build the plot from a template: a floor, walls, a sign with the owner's name, and podiums (start with 4 slots, expandable to 24 via purchase). Placing a brainrot spawns its model on a podium with a floating billboard showing name, mutation, and $/sec. Release and wipe the plot on leave.
+**PlotService** — Assign each joining player an unclaimed base plot. Build the plot from a template: a floor, walls, a sign with the owner's name, and podiums (start with 4 slots, expandable to 10 via purchase). Placing a brainrot spawns its model on a podium with a floating billboard showing name, mutation, and $/sec. Release and wipe the plot on leave.
 
 **IncomeService** — Accrue income on a 1-second server heartbeat: sum of all placed brainrots' `incomePerSecond * mutationMultiplier * rebirthMultiplier`. Cap offline earnings at 4 hours on rejoin and show a "While you were away" popup.
 
@@ -201,7 +240,7 @@ Ship **6 depth layers** (Topsoil, Stonecore, Ironvein, Crystalis, Magmadeep, The
 
 ## 6. UI Requirements
 
-Build all UI in code (no `.rbxmx` dependency), styled per §2a: dark slate panels, **square corners with hard 2px borders** (not rounded — §2a overrides this), flat fills with no gradients or drop shadows, a saturated accent per rarity, `GothamBold`-family fonts, and snappy stepped open/close rather than soft spring fades. Include:
+Build all UI in code (no `.rbxmx` dependency), styled per §2b: deep indigo panels, **chunky rounded corners with a heavy near-black outline**, a vertical sheen on every fill, outlined text, a saturated accent per rarity and a distinct header colour per screen, `Gotham`-family fonts, and snappy stepped open/close rather than soft spring fades. Include:
 
 - **HUD:** coins (abbreviated), $/sec, backpack fill bar with color shift as it fills, current depth in studs, equipped pickaxe icon.
 - **Shop:** tabbed (Pickaxes / Backpacks / Plot Slots / Layer Keys), each card showing stat delta vs. currently equipped, owned/equipped/locked states, and a disabled-with-reason state when unaffordable.

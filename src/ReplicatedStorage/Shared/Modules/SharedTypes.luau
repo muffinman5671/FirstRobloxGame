@@ -132,6 +132,10 @@ export type Profile = {
 	plotSlots: number,
 	lastOnlineUnix: number,
 	playtime: number,
+	-- Daily reward. The day is DailyReward.dayIndex of the last claim, 0 if
+	-- there has never been one; see Shared/Modules/DailyReward.
+	dailyStreak: number,
+	dailyLastClaimDay: number,
 }
 
 -- What the DataStore key actually holds: the profile plus the session lock.
@@ -170,6 +174,8 @@ export type ProfileSnapshot = {
 	indexDiscovered: { [string]: boolean },
 	plotSlots: number,
 	incomePerSecond: number,
+	dailyStreak: number,
+	dailyLastClaimDay: number,
 }
 
 export type ConversionResult = {

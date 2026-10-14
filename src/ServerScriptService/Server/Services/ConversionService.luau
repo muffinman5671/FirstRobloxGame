@@ -22,7 +22,9 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local BrainrotConfig = require(ReplicatedStorage.Shared.Config.BrainrotConfig)
 local Conversion = require(ReplicatedStorage.Shared.Modules.Conversion)
+local Format = require(ReplicatedStorage.Shared.Modules.Format)
 local GameConfig = require(ReplicatedStorage.Shared.Config.GameConfig)
+local IndexBonus = require(ReplicatedStorage.Shared.Modules.IndexBonus)
 local OreConfig = require(ReplicatedStorage.Shared.Config.OreConfig)
 local Rarity = require(ReplicatedStorage.Shared.Modules.Rarity)
 local RemoteRegistry = require(ReplicatedStorage.Shared.Remotes.RemoteRegistry)
@@ -52,6 +54,36 @@ local rng = Random.new()
 local function rollMutation(): string
 	local picked = Rarity.rollMap(Conversion.mutationTable(), rng)
 	return picked or "Normal"
+end
+
+-- Beat between the reveal landing and the toast that follows it.
+local REVEAL_SETTLE_SECONDS = 0.6
+
+--[[
+	Tells the player what a first-ever discovery did to their index bonus.
+
+	Held back until the reveal has played. The toast names the rarity, and the
+	reveal's whole job is to build up to that -- firing this on the roll would
+	announce the result while the suspense animation is still running.
+]]
+local function announceDiscovery(player: Player, rarity: string, discovered: { [string]: boolean })
+	local summary = IndexBonus.summarize(discovered)
+	local total = `income bonus now +{Format.percent(summary.bonus)}`
+
+	local message = `New discovery -- {total}`
+	for _, band in summary.bands do
+		-- Only a discovery of this rarity can have finished this band, so a
+		-- complete band here was completed by this roll.
+		if band.rarity == rarity and band.complete then
+			message = `{rarity} set complete -- {total}`
+		end
+	end
+
+	task.delay((Rarity.REVEAL_SECONDS[rarity] or 0) + REVEAL_SETTLE_SECONDS, function()
+		if player.Parent then
+			RemoteRegistry.event("NotifyToast"):FireClient(player, "index_bonus", message)
+		end
+	end)
 end
 
 --[[
@@ -129,6 +161,13 @@ function ConversionService.convert(player: Player, oreId: any): ConversionResult
 	-- rarity via Rarity.REVEAL_SECONDS.
 	RemoteRegistry.event("ConversionResult"):FireClient(player, result)
 	ConversionService.Converted:Fire(player, picked.id, mutation, isNew)
+
+	if isNew then
+		local updated = DataService.get(player)
+		if updated then
+			announceDiscovery(player, picked.rarity, updated.indexDiscovered)
+		end
+	end
 
 	if def and Rarity.atLeast(picked.rarity, "Legendary") then
 		DataService.saveNow(player)

@@ -145,8 +145,10 @@ end
 
 function NotifyController.Start()
 	trove:Connect(RemoteRegistry.event("NotifyToast").OnClientEvent, function(kind: string, message: string)
-		local color = if kind == "purchase" or kind == "layer_unlocked" or kind == "rebirth"
+		local color = if kind == "purchase" or kind == "layer_unlocked" or kind == "rebirth" or kind == "index_bonus"
 			then Theme.COLOR.accent
+			elseif kind == "discovery" then Theme.COLOR.accentAlt
+			elseif kind == "daily_reward" then Theme.COLOR.coins
 			else Theme.COLOR.warn
 		NotifyController.toast(message, color)
 	end)

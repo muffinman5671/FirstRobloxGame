@@ -32,10 +32,17 @@ LayerConfig.LAYERS = table.freeze({
 		hpMultiplier = 1,
 		unlockCost = 0,
 		-- Tufty cartoon grass on the surface row, soft grainy dirt underneath.
-		-- Chunky, illustrated materials throughout rather than photoreal ones.
-		material = Enum.Material.Sand,
+		--[[
+			Material is flat for every layer now -- see GameConfig.MineBlockMaterial.
+			These fields are kept because a layer may still want to opt out, but the
+			mine overrides them: the granular materials fought `cartoonify` and won,
+			and a layer is told apart by its colour, not its grain.
+		]]
+		material = Enum.Material.SmoothPlastic,
 		baseColor = Color3.fromRGB(146, 94, 52),
-		topMaterial = Enum.Material.LeafyGrass,
+		-- Matches the hub lawn, which is flat too; a grained cap met a flat lawn
+		-- at the shaft lip and the seam showed.
+		topMaterial = Enum.Material.SmoothPlastic,
 		topColor = Color3.fromRGB(102, 180, 62),
 		ambientColor = Color3.fromRGB(118, 106, 88),
 		fogColor = Color3.fromRGB(150, 138, 118),
@@ -49,7 +56,7 @@ LayerConfig.LAYERS = table.freeze({
 		maxDepth = 180,
 		hpMultiplier = 3.5,
 		unlockCost = 2500,
-		material = Enum.Material.Cobblestone,
+		material = Enum.Material.SmoothPlastic,
 		baseColor = Color3.fromRGB(118, 124, 138),
 		ambientColor = Color3.fromRGB(84, 88, 96),
 		fogColor = Color3.fromRGB(96, 102, 112),
@@ -63,7 +70,7 @@ LayerConfig.LAYERS = table.freeze({
 		maxDepth = 330,
 		hpMultiplier = 12,
 		unlockCost = 28000,
-		material = Enum.Material.Pebble,
+		material = Enum.Material.SmoothPlastic,
 		baseColor = Color3.fromRGB(142, 78, 48),
 		ambientColor = Color3.fromRGB(96, 74, 60),
 		fogColor = Color3.fromRGB(112, 84, 66),
@@ -77,7 +84,7 @@ LayerConfig.LAYERS = table.freeze({
 		maxDepth = 520,
 		hpMultiplier = 42,
 		unlockCost = 310000,
-		material = Enum.Material.Ice,
+		material = Enum.Material.SmoothPlastic,
 		baseColor = Color3.fromRGB(72, 146, 214),
 		ambientColor = Color3.fromRGB(70, 96, 128),
 		fogColor = Color3.fromRGB(78, 118, 158),
@@ -91,7 +98,7 @@ LayerConfig.LAYERS = table.freeze({
 		maxDepth = 760,
 		hpMultiplier = 150,
 		unlockCost = 3400000,
-		material = Enum.Material.Sandstone,
+		material = Enum.Material.SmoothPlastic,
 		baseColor = Color3.fromRGB(168, 52, 32),
 		ambientColor = Color3.fromRGB(128, 58, 40),
 		fogColor = Color3.fromRGB(158, 62, 36),
@@ -105,7 +112,7 @@ LayerConfig.LAYERS = table.freeze({
 		maxDepth = 1040,
 		hpMultiplier = 520,
 		unlockCost = 38000000,
-		material = Enum.Material.Marble,
+		material = Enum.Material.SmoothPlastic,
 		baseColor = Color3.fromRGB(74, 62, 104),
 		ambientColor = Color3.fromRGB(58, 58, 66),
 		fogColor = Color3.fromRGB(40, 40, 48),

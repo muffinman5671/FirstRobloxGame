@@ -58,25 +58,8 @@ function ShopFrame.new(parent: Instance): ShopFrame
 	outer.Parent = parent
 	self.instance = outer
 
-	local header = Instance.new("Frame")
-	header.BackgroundColor3 = Theme.COLOR.panelRaised
-	header.BorderSizePixel = 0
-	header.Size = UDim2.new(1, 0, 0, Theme.METRIC.headerHeight)
+	local header, close = Theme.header("Shop", { accent = Theme.COLOR.accent })
 	header.Parent = inner
-
-	local title = Theme.label("SHOP", {
-		Font = Theme.FONT.heading,
-		TextSize = Theme.TEXT_SIZE.heading,
-		Size = UDim2.new(1, -Theme.METRIC.tapTarget, 1, 0),
-		Position = UDim2.fromOffset(Theme.METRIC.pad, 0),
-	})
-	title.Parent = header
-
-	local close = Theme.button("X", {
-		Size = UDim2.fromOffset(Theme.METRIC.tapTarget, Theme.METRIC.headerHeight),
-		Position = UDim2.new(1, -Theme.METRIC.tapTarget, 0, 0),
-	})
-	close.Parent = header
 	close.Activated:Connect(function()
 		self:setVisible(false)
 	end)
@@ -144,8 +127,7 @@ end
 
 function ShopFrame:_refreshTabs()
 	for name, button in self._tabButtons do
-		button.BackgroundColor3 = if name == self._tab then Theme.COLOR.accent else Theme.COLOR.buttonIdle
-		button.TextColor3 = if name == self._tab then Theme.COLOR.panelSunken else Theme.COLOR.text
+		button:SetAttribute("Selected", name == self._tab)
 	end
 end
 
@@ -170,11 +152,9 @@ function ShopFrame:_buildCard(spec: {
 	card.Size = UDim2.new(1, 0, 0, 76)
 	card.LayoutOrder = spec.order
 	card.Parent = self._cardList
+	Theme.card(card)
 
-	local stripe = Instance.new("Frame")
-	stripe.BackgroundColor3 = spec.accent or Theme.COLOR.borderLight
-	stripe.BorderSizePixel = 0
-	stripe.Size = UDim2.new(0, 5, 1, 0)
+	local stripe = Theme.accentBar(spec.accent or Theme.COLOR.borderLight)
 	stripe.Parent = card
 
 	local name = Theme.label(spec.title, {

@@ -12,6 +12,7 @@
 	those purchases spend.
 ]]
 
+local CollectionService = game:GetService("CollectionService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local GameConfig = require(ReplicatedStorage.Shared.Config.GameConfig)
@@ -139,10 +140,75 @@ end
 	The payout is recomputed from OreConfig every time. The client's inventory
 	view is a display of server state, never an input to the price.
 ]]
+--[[
+	The sell stall's standing circle.
+
+	Found through MineService's tag rather than by requiring MineService, which
+	would close a module cycle: MineService reaches PlotService, which reaches
+	ShopService and this service. The built part is the better source anyway --
+	it carries its own radius, so the server and the client are measuring the
+	same circle rather than two copies of a config number.
+
+	Cached, but revalidated: a pad whose Parent has gone means the hub was rebuilt.
+]]
+local sellPad: BasePart? = nil
+
+local function findSellPad(): BasePart?
+	local cached = sellPad
+	if cached and cached.Parent then
+		return cached
+	end
+
+	sellPad = nil
+	for _, pad in CollectionService:GetTagged(GameConfig.PanelPadTag) do
+		if pad:IsA("BasePart") and pad:GetAttribute(GameConfig.ShopKeyAttribute) == "sell" then
+			sellPad = pad
+			break
+		end
+	end
+	return sellPad
+end
+
+--[[
+	Is the player standing at the sell stall?
+
+	Ore is sold there and nowhere else. The Backpack panel still opens anywhere
+	-- looking at your haul underground is the point of it -- so the restriction
+	has to live on the sale rather than on the screen.
+
+	No pad means the hub has not finished building. Refusing in that window is
+	the safe way round: nobody can be at a stall that does not exist yet.
+]]
+local function atSellStall(player: Player): boolean
+	local pad = findSellPad()
+	if not pad then
+		return false
+	end
+
+	local character = player.Character
+	local root = character and character:FindFirstChild("HumanoidRootPart")
+	if not root or not root:IsA("BasePart") then
+		return false
+	end
+
+	-- The pad is a cylinder laid flat, so its diameter is Size.Y/Size.Z and
+	-- Size.X is the thickness -- the same reading UIController's watcher does.
+	local radius = math.max(pad.Size.Y, pad.Size.Z) / 2 + GameConfig.SellRangeTolerance
+
+	-- Horizontal only, with a height band: a player in the shaft directly below
+	-- the plaza is not at the stall, and the same band guards the pad trigger.
+	local offset = root.Position - pad.Position
+	return Vector2.new(offset.X, offset.Z).Magnitude <= radius and math.abs(offset.Y) <= 12
+end
+
 function EconomyService.sell(player: Player, oreId: string?): PurchaseResult
 	local profile = DataService.get(player)
 	if not profile then
 		return { ok = false, reason = "profile_not_loaded" }
+	end
+
+	if not atSellStall(player) then
+		return { ok = false, reason = "not_at_sell_shop" }
 	end
 
 	local sold: { [string]: number }

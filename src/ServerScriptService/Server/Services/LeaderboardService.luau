@@ -38,13 +38,15 @@ local TOP_N = 10
 
 -- OrderedDataStore only stores integers, and only positive ones sort usefully.
 local BOARDS = {
+	-- Accent lives on the placement in GameConfig, not here: HubDecor paints the
+	-- board's lamp bollards with it too, and two copies would drift.
 	{ key = "coins", store = "TopCoinsEarned_v1", title = "TOP EARNERS", format = "coins" },
 	{ key = "rebirths", store = "TopRebirths_v1", title = "TOP REBIRTHS", format = "plain" },
 }
 
 local stores: { [string]: OrderedDataStore } = {}
 local cached: { [string]: { { name: string, value: number } } } = {}
-local boards: { [string]: TextLabel } = {}
+local boards: { [string]: Frame } = {}
 local lifetimeEarned: { [Player]: number } = {}
 local available = true
 
@@ -168,84 +170,357 @@ end
 -- ==========================================================================
 
 --[[
-	Boards stand in a row along the west side of the plaza, turned to face east
+	Boards stand in a row along the west side of the stem, turned to face east
 	across it.
 
 	The row runs along Z and the signs face +X, which is why the spacing is
-	applied to Z here and the part is rotated: a board's SurfaceGui is on its
-	Front face, and Front points down -Z until you turn it.
-]]
-local function buildBoard(spec, index: number, parent: Instance): TextLabel
-	local centre = GameConfig.LeaderboardCenter
-	local offset = (index - 1.5) * GameConfig.LeaderboardSpacing
+	applied to Z and the cabinet is yawed -90 degrees. Everything is built from
+	that one origin CFrame with local offsets -- local +X runs along the board's
+	width, local -Z is the face -- rather than in world coordinates, so the whole
+	cabinet turns as a unit and no offset has to be re-derived if the row moves.
 
-	local sign = Instance.new("Part")
-	sign.Name = `Board_{spec.key}`
-	sign.Size = Vector3.new(38, 26, 2)
-	sign.CFrame = CFrame.new(centre.X, GameConfig.SurfaceY + GameConfig.LeaderboardHeight, centre.Z + offset)
-		* CFrame.Angles(0, -math.pi / 2, 0)
-	sign.Anchored = true
-	sign.Locked = true
-	sign.Color = Color3.fromRGB(30, 32, 38)
-	sign.Material = Enum.Material.Concrete
-	sign.Parent = parent
+	This used to be a single grey slab hanging in the air with a flat green strip
+	across the top. It is a cabinet now: plinth, two posts, a heavy frame round
+	the face and a coloured crown. That is DESIGN.md 2b's outline-and-chunk
+	treatment done in geometry, because 2a wants world detail built rather than
+	textured.
+]]
+local function panelPart(
+	parent: Instance,
+	name: string,
+	origin: CFrame,
+	offset: Vector3,
+	size: Vector3,
+	colour: Color3
+): BasePart
+	local part = Instance.new("Part")
+	part.Name = name
+	part.Anchored = true
+	part.Locked = true
+	part.Size = size
+	part.CFrame = origin * CFrame.new(offset)
+	part.Color = colour
+	part.Material = Enum.Material.SmoothPlastic
+	part.TopSurface = Enum.SurfaceType.Smooth
+	part.BottomSurface = Enum.SurfaceType.Smooth
+	part.Parent = parent
+	return part
+end
+
+local function corner(parent: Instance, radius: number)
+	local ui = Instance.new("UICorner")
+	ui.CornerRadius = UDim.new(0, radius)
+	ui.Parent = parent
+end
+
+-- Border mode draws outside the frame, so an outline costs no layout: a row is
+-- still exactly as wide as it was laid out to be.
+local function stroke(parent: Instance, thickness: number)
+	local ui = Instance.new("UIStroke")
+	ui.Thickness = thickness
+	ui.Color = GameConfig.BoardPalette.border
+	ui.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+	ui.Parent = parent
+end
+
+local function label(parent: Instance, text: string, size: UDim2, position: UDim2): TextLabel
+	local item = Instance.new("TextLabel")
+	item.BackgroundTransparency = 1
+	item.Size = size
+	item.Position = position
+	item.Font = Enum.Font.GothamBlack
+	item.Text = text
+	item.TextColor3 = GameConfig.BoardPalette.text
+	-- Outlined glyphs, per 2b. White on a black outline reads against the panel,
+	-- against a gold badge, and at the distance these are read from.
+	item.TextStrokeColor3 = GameConfig.BoardPalette.border
+	item.TextStrokeTransparency = 0
+	item.Parent = parent
+	return item
+end
+
+--[[
+	The cabinet, returning the frame the rows are laid into.
+
+	The canvas is FixedSize on purpose. SurfaceGui ignores CanvasSize unless
+	SizingMode says to use it, and the default is PixelsPerStud -- so the old
+	board declared a 380x260 canvas and then drew onto the ~1900x1300 one
+	PixelsPerStud gives a 38x26 face. That is why its 34px title bar came out as
+	a hairline and its text sat in the top corner.
+]]
+local function buildBoard(spec, parent: Instance): Frame
+	local pal = GameConfig.BoardPalette
+	local placement = GameConfig.LeaderboardPlacements[spec.key]
+	local accent = placement.accent
+
+	local faceW = GameConfig.LeaderboardFaceWidth
+	local faceH = GameConfig.LeaderboardFaceHeight
+	local frame = GameConfig.LeaderboardFrame
+	local halfW, halfH = faceW / 2, faceH / 2
+	local boardY = GameConfig.LeaderboardHeight
+
+	-- Ground level, so every offset below reads as a height above the lawn, and
+	-- yawed so the whole cabinet turns as a unit.
+	local origin = CFrame.new(placement.position.X, GameConfig.SurfaceY, placement.position.Z)
+		* CFrame.Angles(0, math.rad(placement.yaw), 0)
+
+	local cabinet = Instance.new("Model")
+	cabinet.Name = "Board_" .. spec.key
+	cabinet.Parent = parent
+
+	-- Plinth and legs. Without these the slab floats, which was most of what
+	-- made the old board look unfinished.
+	panelPart(cabinet, "Plinth", origin, Vector3.new(0, 0.9, 0), Vector3.new(faceW + 4, 1.8, 7), pal.border)
+	for _, side in { -1, 1 } do
+		panelPart(
+			cabinet,
+			"Post",
+			origin,
+			Vector3.new(side * (halfW - 6), GameConfig.LeaderboardPostHeight / 2 + 1.8, 0),
+			Vector3.new(3.6, GameConfig.LeaderboardPostHeight, 3.6),
+			pal.post
+		)
+	end
+
+	local slab =
+		panelPart(cabinet, "Face", origin, Vector3.new(0, boardY, 0), Vector3.new(faceW, faceH, 2), pal.panelSunken)
+	cabinet.PrimaryPart = slab
+
+	--[[
+		The frame, as four bars round the opening rather than a plate over it.
+
+		Each bar sits flush against an edge of the slab and stands proud of the
+		face, so it reads as a moulding. Laying it over the face instead would put
+		two surfaces on one plane and z-fight, which is the most visible bug
+		available in this codebase.
+	]]
+	local bar = frame / 2
+	local depth = 3.4
+	local z = -0.6
+	for _, side in { -1, 1 } do
+		panelPart(
+			cabinet,
+			"FrameH",
+			origin,
+			Vector3.new(0, boardY + side * (halfH + bar), z),
+			Vector3.new(faceW + frame * 2, frame, depth),
+			pal.border
+		)
+		panelPart(
+			cabinet,
+			"FrameV",
+			origin,
+			Vector3.new(side * (halfW + bar), boardY, z),
+			Vector3.new(frame, faceH, depth),
+			pal.border
+		)
+	end
+
+	-- Crown: the board's own accent, as a chunky cap with a block at each end,
+	-- so the two are told apart by colour and silhouette from across the
+	-- corridor, before either is close enough to read.
+	local crownY = boardY + halfH + frame + 1.7
+	panelPart(cabinet, "Crown", origin, Vector3.new(0, crownY, z), Vector3.new(faceW + frame * 2, 3.4, depth), accent)
+	for _, side in { -1, 1 } do
+		panelPart(
+			cabinet,
+			"Finial",
+			origin,
+			Vector3.new(side * (halfW + bar), crownY + 2.4, z),
+			Vector3.new(4.2, 4.2, depth + 0.6),
+			accent
+		)
+	end
 
 	local surface = Instance.new("SurfaceGui")
 	surface.Face = Enum.NormalId.Front
-	surface.CanvasSize = Vector2.new(380, 260)
-	surface.Parent = sign
+	surface.SizingMode = Enum.SurfaceGuiSizingMode.FixedSize
+	surface.CanvasSize = Vector2.new(faceW * 20, faceH * 20)
+	-- Unlit: this is a poster, and a board that dims as the sun moves round is a
+	-- board nobody reads from the far side of the corridor.
+	surface.LightInfluence = 0
+	surface.Parent = slab
 
-	local title = Instance.new("TextLabel")
-	title.Size = UDim2.new(1, 0, 0, 34)
-	title.BackgroundColor3 = Color3.fromRGB(120, 232, 140)
+	local backdrop = Instance.new("Frame")
+	backdrop.Size = UDim2.fromScale(1, 1)
+	backdrop.BackgroundColor3 = pal.panel
+	backdrop.BorderSizePixel = 0
+	backdrop.Parent = surface
+
+	local pad = Instance.new("UIPadding")
+	pad.PaddingLeft = UDim.new(0, 14)
+	pad.PaddingRight = UDim.new(0, 14)
+	pad.PaddingTop = UDim.new(0, 12)
+	pad.PaddingBottom = UDim.new(0, 12)
+	pad.Parent = backdrop
+
+	local title = Instance.new("Frame")
+	title.Size = UDim2.new(1, 0, 0, 78)
+	title.BackgroundColor3 = accent
 	title.BorderSizePixel = 0
-	title.Font = Enum.Font.GothamBlack
-	title.TextSize = 22
-	title.TextColor3 = Color3.fromRGB(18, 19, 24)
-	title.Text = spec.title
-	title.Parent = surface
+	title.Parent = backdrop
+	corner(title, 16)
+	stroke(title, 6)
 
-	local body = Instance.new("TextLabel")
-	body.Size = UDim2.new(1, -16, 1, -44)
-	body.Position = UDim2.fromOffset(8, 40)
-	body.BackgroundTransparency = 1
-	body.Font = Enum.Font.GothamBold
-	body.TextSize = 17
-	body.TextColor3 = Color3.fromRGB(238, 240, 246)
-	body.TextXAlignment = Enum.TextXAlignment.Left
-	body.TextYAlignment = Enum.TextYAlignment.Top
-	body.Text = "loading..."
-	body.Parent = surface
+	local titleText = label(title, spec.title, UDim2.fromScale(1, 1), UDim2.new())
+	titleText.TextSize = 46
 
-	return body
+	local rows = Instance.new("Frame")
+	rows.Name = "Rows"
+	rows.BackgroundTransparency = 1
+	rows.Position = UDim2.fromOffset(0, 90)
+	rows.Size = UDim2.new(1, 0, 1, -90)
+	rows.Parent = backdrop
+
+	local list = Instance.new("UIListLayout")
+	list.FillDirection = Enum.FillDirection.Vertical
+	list.Padding = UDim.new(0, 4)
+	list.SortOrder = Enum.SortOrder.LayoutOrder
+	list.Parent = rows
+
+	return rows
+end
+
+--[[
+	One rank per row: a coloured badge, the name, then the number.
+
+	The old board wrote all ten lines into a single TextLabel and lined the
+	columns up with a "%-14s" pad. Padding only aligns in a monospaced font and
+	Gotham is not one, so the values never actually formed a column. Three
+	positioned labels do, at any name length.
+]]
+local function buildRow(parent: Instance, rank: number, name: string, value: string)
+	local pal = GameConfig.BoardPalette
+	local podium = rank <= #GameConfig.BoardRankColors
+
+	local row = Instance.new("Frame")
+	row.Name = "Rank" .. rank
+	row.LayoutOrder = rank
+	row.Size = UDim2.new(1, 0, 0, 34)
+	row.BackgroundColor3 = if rank % 2 == 1 then pal.panelRaised else pal.panelSunken
+	row.BorderSizePixel = 0
+	row.Parent = parent
+	corner(row, 8)
+	stroke(row, 3)
+
+	local badge = Instance.new("Frame")
+	badge.Size = UDim2.fromOffset(38, 26)
+	badge.Position = UDim2.fromOffset(5, 4)
+	badge.BackgroundColor3 = GameConfig.BoardRankColors[rank] or GameConfig.BoardRankOther
+	badge.BorderSizePixel = 0
+	badge.Parent = row
+	corner(badge, 7)
+	stroke(badge, 3)
+
+	local rankText = label(badge, tostring(rank), UDim2.fromScale(1, 1), UDim2.new())
+	rankText.TextSize = 20
+	-- The three podium colours are light, so their numerals take the dark ink and
+	-- drop the outline; everyone else sits on the muted slate and keeps white.
+	rankText.TextColor3 = if podium then pal.border else pal.text
+	rankText.TextStrokeTransparency = if podium then 1 else 0
+
+	local who = label(row, name, UDim2.new(1, -190, 1, 0), UDim2.fromOffset(52, 0))
+	who.TextSize = 22
+	who.TextXAlignment = Enum.TextXAlignment.Left
+	who.TextTruncate = Enum.TextTruncate.AtEnd
+
+	local amount = label(row, value, UDim2.new(0, 128, 1, 0), UDim2.new(1, -134, 0, 0))
+	amount.TextSize = 22
+	amount.TextColor3 = pal.coins
+	amount.TextXAlignment = Enum.TextXAlignment.Right
 end
 
 local function render(spec)
-	local label = boards[spec.key]
-	if not label then
+	local rows = boards[spec.key]
+	if not rows then
 		return
 	end
 
-	local rows = cached[spec.key] or {}
-	if #rows == 0 then
-		label.Text = "no entries yet"
+	-- Rebuilt wholesale on every refresh: ten rows a minute is not worth pooling,
+	-- and a rebuild cannot leave a stale name behind a shorter list.
+	for _, child in rows:GetChildren() do
+		if child:IsA("GuiObject") then
+			child:Destroy()
+		end
+	end
+
+	local entries = cached[spec.key] or {}
+	if #entries == 0 then
+		local empty = label(rows, "no entries yet", UDim2.new(1, 0, 0, 40), UDim2.new())
+		empty.TextSize = 22
+		empty.TextColor3 = GameConfig.BoardPalette.textDim
 		return
 	end
 
-	local lines = {}
-	for rank, row in rows do
+	for rank, entry in entries do
 		if rank > TOP_N then
 			break
 		end
-		local value = if spec.format == "coins" then "$" .. Format.abbreviate(row.value) else tostring(row.value)
-		table.insert(lines, ("%2d. %-14s %s"):format(rank, string.sub(row.name, 1, 14), value))
+		local value = if spec.format == "coins" then "$" .. Format.abbreviate(entry.value) else tostring(entry.value)
+		buildRow(rows, rank, entry.name, value)
 	end
-	label.Text = table.concat(lines, "\n")
 end
 
 -- ==========================================================================
 -- Lifecycle
 -- ==========================================================================
+
+--[[
+	Builds the cabinets into a preview folder, filled with placeholder ranks.
+
+	Mirrors PlotService.appendPreview, and exists for the same reason: the hub is
+	worked on in Edit, and until now the boards only existed once the game was
+	running. A SurfaceGui parented to a Part in Workspace *does* render in the
+	Edit viewport -- unlike a ScreenGui, which needs Play -- so the whole board,
+	rows and all, can be looked at without starting the game.
+
+	Sample rows rather than real ones: DataStores are not reachable from Edit,
+	and an empty board tells you nothing about whether the layout works.
+]]
+local PREVIEW_NAMES = {
+	"Braindrop", "Tralalero", "SigmaMiner", "CrocPilot", "BombardiroX",
+	"Lirili", "PatapimFan", "Bananini", "TungTung", "CappuccinoA",
+}
+
+function LeaderboardService.appendPreview(parent: Instance): number
+	local folder = Instance.new("Folder")
+	folder.Name = "Leaderboards"
+
+	local previousBoards = {}
+	for key, value in boards do
+		previousBoards[key] = value
+	end
+
+	local ok, err = pcall(function()
+		for _, spec in BOARDS do
+			boards[spec.key] = buildBoard(spec, folder)
+
+			local sample = {}
+			for rank, name in PREVIEW_NAMES do
+				local value = if spec.format == "coins"
+					then math.floor(12_500_000 / (rank * rank))
+					else 40 - rank * 3
+				table.insert(sample, { name = name, value = value })
+			end
+			cached[spec.key] = sample
+			render(spec)
+			cached[spec.key] = nil
+		end
+	end)
+
+	table.clear(boards)
+	for key, value in previousBoards do
+		boards[key] = value
+	end
+
+	if not ok then
+		folder:Destroy()
+		error(`[LeaderboardService] preview build failed: {err}`, 0)
+	end
+
+	folder.Parent = parent
+	return #folder:GetChildren()
+end
 
 function LeaderboardService.Init()
 	DataService = require(script.Parent.DataService)
@@ -257,8 +532,8 @@ function LeaderboardService.Start()
 	folder.Name = "Leaderboards"
 	folder.Parent = Workspace
 
-	for index, spec in BOARDS do
-		boards[spec.key] = buildBoard(spec, index, folder)
+	for _, spec in BOARDS do
+		boards[spec.key] = buildBoard(spec, folder)
 	end
 
 	-- Lifetime earnings accumulate from every positive coin change, so
